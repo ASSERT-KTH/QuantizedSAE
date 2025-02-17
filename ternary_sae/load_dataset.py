@@ -1,0 +1,53 @@
+from datasets import load_dataset
+from transformers import GPTNeoXForCausalLM, AutoTokenizer
+import torch
+
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / total))
+    filled_length = int(length * iteration // total)
+    bar = fill * filled_length + '-' * (length - filled_length)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end='\r')
+    # Print a newline when the progress is complete
+    if iteration == total:
+        print()
+
+# n_contexts = 40000000
+n_contexts = 4000000 
+len_sample = 250
+
+tokenizer = AutoTokenizer.from_pretrained(
+  "EleutherAI/pythia-70m-deduped",
+  revision="step3000",
+  cache_dir="./pythia-70m-deduped/step3000",
+)
+
+dataset = load_dataset("EleutherAI/the_pile_deduplicated", split="train", streaming=True)
+shuffled_dataset = dataset.shuffle(buffer_size=10000, seed=42)
+
+trainingset = {"input_ids": [], "attention_mask": []}
+
+for doc in dataset:
+# for doc in shuffled_dataset:
+    text = doc["text"]
+    token_seq = tokenizer(text, return_tensors="pt")
+
+    length = len(token_seq["input_ids"][0])
+
+    if length < len_sample:
+        continue
+
+    start_idx = torch.randint(0, length - len_sample + 1, (1,)).item()
+
+    trainingset["input_ids"].append(token_seq["input_ids"][0][start_idx:start_idx+len_sample])
+    trainingset["attention_mask"].append(token_seq["attention_mask"][0][start_idx:start_idx+len_sample])
+
+    added_contexts = len(trainingset["input_ids"])
+
+    print_progress_bar(added_contexts, n_contexts, prefix='Progress:', suffix='Complete', length=50)
+
+    if added_contexts == n_contexts:
+        break
+
+torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_4m")
+# torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_40m")
+print("Completed!")
