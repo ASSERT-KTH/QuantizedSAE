@@ -1,5 +1,5 @@
-dataset/
-model/
+dataset/*
+model/*
 
 nohop.out
 log.out
