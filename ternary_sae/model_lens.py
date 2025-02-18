@@ -3,13 +3,13 @@ from transformers import GPTNeoXForCausalLM, AutoTokenizer
 model = GPTNeoXForCausalLM.from_pretrained(
   "EleutherAI/pythia-70m-deduped",
   revision="step3000",
-  cache_dir="./models/pythia-70m-deduped/step3000",
+  cache_dir="./model/pythia-70m-deduped/step3000",
 )
 
 tokenizer = AutoTokenizer.from_pretrained(
   "EleutherAI/pythia-70m-deduped",
   revision="step3000",
-  cache_dir="./models/pythia-70m-deduped/step3000",
+  cache_dir="./model/pythia-70m-deduped/step3000",
 )
 
 Text = "Hello, I am"
