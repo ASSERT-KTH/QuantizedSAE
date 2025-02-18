@@ -14,7 +14,6 @@ tokenizer = AutoTokenizer.from_pretrained(
 
 SAE_layer = 3
 
-print("Test")
 inputs = tokenizer("Hello, I am", return_tensors="pt")
 tokens = model.generate(**inputs)
 print(tokens.tolist())
