@@ -18,7 +18,7 @@ len_sample = 250
 tokenizer = AutoTokenizer.from_pretrained(
   "EleutherAI/pythia-70m-deduped",
   revision="step3000",
-  cache_dir="./pythia-70m-deduped/step3000",
+  cache_dir="./model/pythia-70m-deduped/step3000",
 )
 
 dataset = load_dataset("EleutherAI/the_pile_deduplicated", split="train", streaming=True)
