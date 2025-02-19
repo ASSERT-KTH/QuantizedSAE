@@ -38,16 +38,34 @@ for layer in model.gpt_neox.layers:
     hooks.append(layer.register_forward_hook(hidden_state_hook))
 
 Text = "Hello, I am"
+# Text = "Hello"
 
 inputs = tokenizer(Text, return_tensors="pt").to(device)
 inputs_tokens = tokenizer.batch_decode(inputs["input_ids"].view(-1, 1))
 print("Input text:", inputs_tokens)
 
-outputs = model.generate(**inputs, max_length = 16)
+outputs = model.generate(**inputs, max_length = 16, return_dict_in_generate=True, output_scores=True)
 
 for hook in hooks:
     hook.remove()
 
+# for step_scores in outputs.scores:
+#     top_tokens = torch.topk(step_scores[0], 5)
+#     print("Top 5 tokens:", tokenizer.batch_decode(top_tokens.indices))
+#     print("Top 5 scores:", top_tokens.values)
+
+input_length = inputs['input_ids'].shape[1]
+generated_sequence = outputs.sequences[0][input_length:]
+
+# print("Generation step by step:")
+# for i, (token, scores) in enumerate(zip(generated_sequence, outputs.scores)):
+#     top_tokens = torch.topk(scores[0], 5)
+#     print(f"\nStep {i + 1}:")
+#     print(f"Chosen token: {tokenizer.decode([token])}")
+#     print("Top 5 candidates:", tokenizer.batch_decode(top_tokens.indices))
+#     print("Scores:", top_tokens.values)
+
+# Hidden states for every layers:
 # for i, hidden_state in enumerate(hidden_states):
 #     print(hidden_state[0].shape)
 #     logits = model.embed_out(hidden_state[0])
@@ -59,6 +77,7 @@ for hook in hooks:
 #     else:
 #         print(f"{i//n_layer+len(inputs_tokens)}th token in layer {i%n_layer+1} is:", predicted_tokens)
 
+# Hidden states for every layers(formatted):
 predictions = {}
     
 for i, hidden_state in enumerate(hidden_states):
@@ -82,13 +101,23 @@ for i, hidden_state in enumerate(hidden_states):
         if token_position not in predictions:
             predictions[token_position] = []
         predictions[token_position].append(predicted_tokens)
+    
+    if layer_num == n_layer - 1:
+        normalized_hidden = model.gpt_neox.final_layer_norm(hidden_state[0])
+        logits = model.embed_out(normalized_hidden)
+        predicted_token_ids = torch.argmax(logits, dim=-1)
+        predicted_tokens = tokenizer.batch_decode(predicted_token_ids)
+        print(predicted_tokens)
 
-for i in range(n_layer):
-    print(f"Layer {i}: ", end="")
-    for pos in predictions:
-        print(predictions[pos][i], end=" ")
-    print()
+print(tokenizer.batch_decode(outputs.sequences))
+# 
+# for i in range(n_layer):
+#     print(f"Layer {i}: ", end="")
+#     for pos in predictions:
+#         print(predictions[pos][i], end=" ")
+#     print()
 
+# MLP output for every layers:
 # for i, mlp_out in enumerate(mlp_outputs):
 #     print(mlp_out.shape)
 #     logits = model.embed_out(mlp_out[0])
@@ -100,7 +129,6 @@ for i in range(n_layer):
 #     else:
 #         print(f"{i//6}th token in layer {i%6+1} is:", predicted_tokens)
 
-print(tokenizer.decode(outputs[0]))
 # print("\nAttention Weights:")
 # for i, attn_out in enumerate(attention_outputs):
 #     print(f"Layer {i+1}: {attn_out.shape}")  # Shape: (batch_size, num_heads, seq_length, seq_length)
