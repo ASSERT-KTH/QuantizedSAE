@@ -13,6 +13,7 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 
 # n_contexts = 40000000
 n_contexts = 4000000 
+# n_contexts = 1000 
 len_sample = 250
 
 tokenizer = AutoTokenizer.from_pretrained(
@@ -24,7 +25,8 @@ tokenizer = AutoTokenizer.from_pretrained(
 dataset = load_dataset("EleutherAI/the_pile_deduplicated", split="train", streaming=True)
 shuffled_dataset = dataset.shuffle(buffer_size=10000, seed=42)
 
-trainingset = {"input_ids": [], "attention_mask": []}
+# trainingset = {"input_ids": [], "attention_mask": []}
+trainingset = []
 
 for doc in dataset:
 # for doc in shuffled_dataset:
@@ -38,16 +40,25 @@ for doc in dataset:
 
     start_idx = torch.randint(0, length - len_sample + 1, (1,)).item()
 
-    trainingset["input_ids"].append(token_seq["input_ids"][0][start_idx:start_idx+len_sample])
-    trainingset["attention_mask"].append(token_seq["attention_mask"][0][start_idx:start_idx+len_sample])
+    # trainingset["input_ids"].append(token_seq["input_ids"][0][start_idx:start_idx+len_sample])
+    # trainingset["attention_mask"].append(token_seq["attention_mask"][0][start_idx:start_idx+len_sample])
+    trainingset.append(token_seq["input_ids"][0][start_idx:start_idx+len_sample])
 
-    added_contexts = len(trainingset["input_ids"])
+    added_contexts = len(trainingset)
+    progress = added_contexts % (n_contexts/100)
 
-    print_progress_bar(added_contexts, n_contexts, prefix='Progress:', suffix='Complete', length=50)
+    print_progress_bar(progress, n_contexts/100, prefix='Progress:', suffix='Complete', length=50)
+
+    if progress == 0:
+        batch_count = added_contexts // (n_contexts/100)
+        torch.save(trainingset, f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
+        trainingset = []
+        print(f"Batch {batch_count} finished!")
 
     if added_contexts == n_contexts:
         break
 
-torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_4m")
+# torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_1k")
+# torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_4m")
 # torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_40m")
 print("Completed!")
