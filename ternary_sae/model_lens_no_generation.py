@@ -40,5 +40,3 @@ for i, hs in enumerate(hidden_states):
 print("\nAttention Weights:")
 for i, attn in enumerate(attentions):
     print(f"Layer {i+1}: {attn.shape}")  # Shape: (batch_size, num_heads, seq_length, seq_length)
-
-outputs = model.generate(**inputs, output_hidden_states=True, output_attentions=True)

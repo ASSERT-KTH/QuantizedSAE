@@ -31,6 +31,7 @@ class TransformerInspector:
         self.attention_outputs = []
         self.mlp_outputs = []
         self.hidden_states = []
+        self.inputs = []
 
     def attention_hook(self, module, input, output):
         self.attention_outputs.append(output[0].detach().cpu())
@@ -54,12 +55,12 @@ class TransformerInspector:
 
     def generate_text(self, text, max_length=16):
         self.reset_outputs()
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-        input_length = inputs["input_ids"].shape[1]
+        self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        input_length = self.inputs["input_ids"].shape[1]
 
         self.register_hooks()
         outputs = self.model.generate(
-            **inputs,
+            **self.inputs,
             max_length=max_length,
             return_dict_in_generate=True,
             output_scores=True
@@ -67,18 +68,26 @@ class TransformerInspector:
         self.remove_hooks()
         
         generated_sequence = outputs.sequences[0][input_length:]
-        return inputs, outputs, generated_sequence
+        return generated_sequence
+    
+    def forward_pass(self, text):
+        self.reset_outputs()
+        self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
 
-    def predict_from_hidden_states(self, inputs):
+        self.register_hooks()
+        self.model(**self.inputs, output_hidden_states=True, output_attentions=True)
+        self.remove_hooks()
+
+    def predict_from_hidden_states(self):
         predictions = {}
-        inputs_tokens = self.tokenizer.batch_decode(inputs["input_ids"].view(-1, 1))
+        input_length = self.inputs["input_ids"].shape[1]
         
         for i, hidden_state in enumerate(self.hidden_states):
             token_position = i // self.n_layer
             layer_num = i % self.n_layer + 1
 
             if i < self.n_layer:
-                for j in range(len(inputs_tokens)):
+                for j in range(input_length):
                     pos = token_position + j
                     logits = self.model.embed_out(hidden_state[0][0][j])
                     predicted_token_id = torch.argmax(logits, dim=-1)
@@ -87,7 +96,7 @@ class TransformerInspector:
                         predictions[pos] = []
                     predictions[pos].append((layer_num, predicted_token))
             else:
-                token_position += len(inputs_tokens)
+                token_position += input_length
                 logits = self.model.embed_out(hidden_state[0][0])
                 predicted_token_id = torch.argmax(logits, dim=-1)
                 predicted_tokens = self.tokenizer.decode(predicted_token_id)
@@ -97,10 +106,15 @@ class TransformerInspector:
         return predictions
 
     def display_predictions(self, predictions):
-        for pos in sorted(predictions):
-            print(f"Token position {pos}:")
-            for layer, token in predictions[pos]:
-                print(f"  Layer {layer}: {token}")
+        for i in range(self.model.config.num_hidden_layers):
+            print(f"Layer {i+1}: ", end="")
+            for pos in predictions:
+                print(predictions[pos][i][1], end=" ")
+            print()
+        # for pos in sorted(predictions):
+        #     print(f"Token position {pos}:")
+        #     for layer, token in predictions[pos]:
+        #         print(f"  Layer {layer}: {token}")
 
 if __name__ == "__main__":
     # device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -113,10 +127,13 @@ if __name__ == "__main__":
     )
 
     input_text = "Hello, I am"
+    # input_text = "I want to generate a section of Python code:\ndef hello():\n"
     print("Input text:", input_text)
 
-    inputs, outputs, generated_sequence = inspector.generate_text(input_text, max_length=16)
-    print("Generated sequence:", inspector.tokenizer.batch_decode(outputs.sequences))
+    # generated_sequence = inspector.generate_text(input_text, max_length=128)
+    # print("Generated sequence:", inspector.tokenizer.batch_decode(outputs.sequences))
 
-    predictions = inspector.predict_from_hidden_states(inputs)
+    inspector.forward_pass(input_text)
+
+    predictions = inspector.predict_from_hidden_states()
     inspector.display_predictions(predictions)
