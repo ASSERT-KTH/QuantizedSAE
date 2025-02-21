@@ -27,6 +27,7 @@ shuffled_dataset = dataset.shuffle(buffer_size=10000, seed=42)
 
 # trainingset = {"input_ids": [], "attention_mask": []}
 trainingset = []
+batch_count = 0
 
 for doc in dataset:
 # for doc in shuffled_dataset:
@@ -50,7 +51,7 @@ for doc in dataset:
     print_progress_bar(progress, n_contexts/100, prefix='Progress:', suffix='Complete', length=50)
 
     if progress == 0:
-        batch_count = added_contexts // (n_contexts/100)
+        batch_count += 1
         torch.save(trainingset, f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
         trainingset = []
         print(f"Batch {batch_count} finished!")
