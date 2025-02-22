@@ -3,14 +3,9 @@ import torch
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
 
 class StopForwardException(Exception):
-    """Custom exception to stop the forward pass after a specific layer."""
     pass
 
 class TransformerInspector:
-    """
-    A framework for loading a transformer model, registering hooks to collect
-    hidden states, attention, and MLP outputs, generating text, and processing outputs.
-    """
 
     def __init__(self, model_name, revision, cache_dir, device="cpu"):
         self.device = device
@@ -86,9 +81,12 @@ class TransformerInspector:
         generated_sequence = outputs.sequences[0][input_length:]
         return generated_sequence
     
-    def forward_pass(self, text, k=None):
+    def forward_pass(self, inputs=None, text=None, k=None):
         self.reset_outputs()
-        self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        if inputs == None and text != None:
+            self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        else:
+            self.inputs = inputs
 
         if k is None:
             self.register_hooks()
@@ -106,9 +104,10 @@ class TransformerInspector:
 
     def predict_from_hidden_states(self):
         predictions = {}
-        input_length = self.inputs["input_ids"].shape[1]
+        input_length = self.inputs["input_ids"].shape[-1]
         
         for i, hidden_state in enumerate(self.hidden_states):
+            # The hidden_states structure: [(tensor(batch, token), grad_fn, DynamicCache())]
             token_position = i // self.n_layer
             layer_num = i % self.n_layer + 1
 
@@ -161,7 +160,7 @@ if __name__ == "__main__":
     # generated_sequence = inspector.generate_text(input_text, max_length=128)
     # print("Generated sequence:", inspector.tokenizer.batch_decode(outputs.sequences))
 
-    inspector.forward_pass(input_text, k=3)
+    inspector.forward_pass(text=input_text, k=3)
 
     predictions = inspector.predict_from_hidden_states()
     inspector.display_predictions(predictions)

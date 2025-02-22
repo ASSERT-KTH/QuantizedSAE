@@ -41,6 +41,7 @@ Text = "Hello, I am"
 # Text = "Hello"
 
 inputs = tokenizer(Text, return_tensors="pt").to(device)
+print(inputs)
 inputs_tokens = tokenizer.batch_decode(inputs["input_ids"].view(-1, 1))
 print("Input text:", inputs_tokens)
 

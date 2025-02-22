@@ -56,7 +56,7 @@ for doc in dataset:
         trainingset = []
         print(f"Batch {batch_count} finished!")
 
-    if added_contexts == n_contexts:
+    if batch_count == 100:
         break
 
 # torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_1k")

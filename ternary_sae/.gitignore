@@ -1,7 +1,9 @@
 dataset/*
 model/*
+tmp/*
 !dataset/.gitkeep
 !model/.gitkeep
+!tmp/.gitkeep
 
 nohop.out
 log.out
