@@ -1,6 +1,7 @@
 dataset/*
 model/*
 tmp/*
+wandb/*
 !dataset/.gitkeep
 !model/.gitkeep
 !tmp/.gitkeep
