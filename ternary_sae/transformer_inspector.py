@@ -65,42 +65,44 @@ class TransformerInspector:
         self.hooks = []
 
     def generate_text(self, text, max_length=16):
-        self.reset_outputs()
-        self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-        input_length = self.inputs["input_ids"].shape[1]
+        with torch.no_grad():
+            self.reset_outputs()
+            self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+            input_length = self.inputs["input_ids"].shape[1]
 
-        self.register_hooks()
-        outputs = self.model.generate(
-            **self.inputs,
-            max_length=max_length,
-            return_dict_in_generate=True,
-            output_scores=True
-        )
-        self.remove_hooks()
+            self.register_hooks()
+            outputs = self.model.generate(
+                **self.inputs,
+                max_length=max_length,
+                return_dict_in_generate=True,
+                output_scores=True
+            )
+            self.remove_hooks()
         
-        generated_sequence = outputs.sequences[0][input_length:]
-        return generated_sequence
+            generated_sequence = outputs.sequences[0][input_length:]
+            return generated_sequence
     
     def forward_pass(self, inputs=None, text=None, k=None):
-        self.reset_outputs()
-        if inputs == None and text != None:
-            self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-        else:
-            self.inputs = inputs
+        with torch.no_grad():
+            self.reset_outputs()
+            if inputs == None and text != None:
+                self.inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+            else:
+                self.inputs = inputs
 
-        if k is None:
-            self.register_hooks()
-            self.model(**self.inputs, output_hidden_states=True, output_attentions=True)
-            self.remove_hooks()
-        else:
-            assert 1 <= k <= self.n_layer, f"k must be between 1 and {self.n_layer}"
-            self.register_hooks(k)
-            try:
-                self.model(**self.inputs)
-            except StopForwardException:
-                pass  # Computation stopped after layer k-1
-            finally:
+            if k is None:
+                self.register_hooks()
+                self.model(**self.inputs, output_hidden_states=True, output_attentions=True)
                 self.remove_hooks()
+            else:
+                assert 1 <= k <= self.n_layer, f"k must be between 1 and {self.n_layer}"
+                self.register_hooks(k)
+                try:
+                    self.model(**self.inputs)
+                except StopForwardException:
+                    pass  # Computation stopped after layer k-1
+                finally:
+                    self.remove_hooks()
 
     def predict_from_hidden_states(self):
         predictions = {}

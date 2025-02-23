@@ -54,15 +54,27 @@ class MidLayerExtractor:
             progress += self.batch_size
             print_progress_bar(progress % total, total, prefix=f"Batch_{int(progress / total)}: ")
 
+            del token_ids_batch
+            del attention_mask_batch
+            del input_dict
             if progress % total == 0:
                 concatenated_hidden_states = torch.cat(collected_hidden_states, dim=0)
-                torch.save(concatenated_hidden_states, os.path.join("tmp/", f"batch_{int(progress / total)}.pt"))
+                temp_filename = os.path.join("tmp/", f"batch_{int(progress / total)}.pt.tmp")
+                final_filename = os.path.join("tmp/", f"batch_{int(progress / total)}.pt")
+                torch.save(concatenated_hidden_states, temp_filename)
+                if self.device.startswith("cuda"):
+                    torch.cuda.synchronize()
+
+                with open(temp_filename, "rb") as f:
+                    os.fsync(f.fileno())
+
+                os.rename(temp_filename, final_filename)
+
+                del concatenated_hidden_states
                 collected_hidden_states = []
             
         self.inspector.remove_hooks()
-        del chunk
-        del dataset
-        del dataloader
+        del dataloader, dataset
 
         self.process_batch(output_path)
 
@@ -79,6 +91,9 @@ class MidLayerExtractor:
             chunk_path = os.path.join(data_dir, chunk_file)
             output_file = chunk_file.replace('the_pile_deduplicated_4m_', f'the_pile_hidden_states_L{self.layer_k}_')
             output_path = os.path.join(output_dir, output_file)
+            if os.path.exists(output_path):
+                continue
+            print(output_path)
             self.process_chunk(chunk_path, output_path)
 
 if __name__ == "__main__":
