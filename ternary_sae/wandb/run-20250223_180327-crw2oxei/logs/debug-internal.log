@@ -1,0 +1,7 @@
+{"time":"2025-02-23T18:03:29.166369437+01:00","level":"INFO","msg":"stream: starting","core version":"0.19.7","symlink path":"/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae/wandb/run-20250223_180327-crw2oxei/logs/debug-core.log"}
+{"time":"2025-02-23T18:03:29.279270173+01:00","level":"INFO","msg":"created new stream","id":"crw2oxei"}
+{"time":"2025-02-23T18:03:29.279379595+01:00","level":"INFO","msg":"stream: started","id":"crw2oxei"}
+{"time":"2025-02-23T18:03:29.279406105+01:00","level":"INFO","msg":"writer: Do: started","stream_id":"crw2oxei"}
+{"time":"2025-02-23T18:03:29.279479966+01:00","level":"INFO","msg":"handler: started","stream_id":"crw2oxei"}
+{"time":"2025-02-23T18:03:29.279448126+01:00","level":"INFO","msg":"sender: started","stream_id":"crw2oxei"}
+{"time":"2025-02-23T18:03:31.022541365+01:00","level":"INFO","msg":"Starting system monitor"}

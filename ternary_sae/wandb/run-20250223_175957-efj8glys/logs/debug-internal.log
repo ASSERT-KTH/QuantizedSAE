@@ -1,0 +1,15 @@
+{"time":"2025-02-23T17:59:59.189251032+01:00","level":"INFO","msg":"stream: starting","core version":"0.19.7","symlink path":"/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae/wandb/run-20250223_175957-efj8glys/logs/debug-core.log"}
+{"time":"2025-02-23T17:59:59.311492338+01:00","level":"INFO","msg":"created new stream","id":"efj8glys"}
+{"time":"2025-02-23T17:59:59.311598119+01:00","level":"INFO","msg":"stream: started","id":"efj8glys"}
+{"time":"2025-02-23T17:59:59.311621+01:00","level":"INFO","msg":"handler: started","stream_id":"efj8glys"}
+{"time":"2025-02-23T17:59:59.3116427+01:00","level":"INFO","msg":"writer: Do: started","stream_id":"efj8glys"}
+{"time":"2025-02-23T17:59:59.31164611+01:00","level":"INFO","msg":"sender: started","stream_id":"efj8glys"}
+{"time":"2025-02-23T18:00:00.866602023+01:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-02-23T18:00:01.174158057+01:00","level":"INFO","msg":"stream: closing","id":"efj8glys"}
+{"time":"2025-02-23T18:00:01.174210058+01:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-02-23T18:00:01.175030808+01:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-02-23T18:00:02.130627339+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-02-23T18:00:02.319547132+01:00","level":"INFO","msg":"handler: closed","stream_id":"efj8glys"}
+{"time":"2025-02-23T18:00:02.319597682+01:00","level":"INFO","msg":"writer: Close: closed","stream_id":"efj8glys"}
+{"time":"2025-02-23T18:00:02.319653543+01:00","level":"INFO","msg":"sender: closed","stream_id":"efj8glys"}
+{"time":"2025-02-23T18:00:02.320420332+01:00","level":"INFO","msg":"stream: closed","id":"efj8glys"}

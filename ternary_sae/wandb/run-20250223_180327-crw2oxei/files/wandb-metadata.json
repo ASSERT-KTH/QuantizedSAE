@@ -1,0 +1,45 @@
+{
+  "os":  "Linux-4.18.0-553.36.1.el8_10.x86_64-x86_64-with-glibc2.28",
+  "python":  "CPython 3.9.7",
+  "startedAt":  "2025-02-23T17:03:29.163936Z",
+  "program":  "/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae/ternary_sae.py",
+  "codePath":  "ternary_sae/ternary_sae.py",
+  "git":  {
+    "remote":  "https://github.com/ASSERT-KTH/QuantizedSAE.git",
+    "commit":  "9b7e9c3d9ac78274883ac51ae9c494112d7c042a"
+  },
+  "email":  "tux.tu@outlook.com",
+  "root":  "/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae",
+  "host":  "berzelius1.nsc.liu.se",
+  "executable":  "/home/x_tuhan/.pyenv/versions/3.9.7/bin/python",
+  "codePathLocal":  "ternary_sae.py",
+  "cpu_count":  64,
+  "cpu_count_logical":  128,
+  "gpu":  "Quadro RTX 6000",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "751248084992",
+      "used":  "79369404416"
+    }
+  },
+  "memory":  {
+    "total":  "540336676864"
+  },
+  "cpu":  {
+    "count":  64,
+    "countLogical":  128
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "Quadro RTX 6000",
+      "memoryTotal":  "24159191040",
+      "cudaCores":  4608,
+      "architecture":  "Turing"
+    }
+  ],
+  "slurm":  {
+    "conf":  "/etc/slurm/slurm.conf"
+  },
+  "cudaVersion":  "12.2"
+}

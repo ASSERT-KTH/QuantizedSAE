@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae/ternary_sae.py", line 111, in <module>
+    model = train(dataset, config)
+  File "/proj/berzelius-2024-336/users/x_tuhan/garage/quantizedSAE/ternary_sae/ternary_sae.py", line 64, in train
+    model = TernarySparseAutoencoder(config.input_dim, config.hidden_dim).to(device)
+AttributeError: 'dict' object has no attribute 'input_dim'
