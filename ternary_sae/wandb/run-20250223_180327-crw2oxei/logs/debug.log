@@ -21,3 +21,11 @@ config: {'input_dim': 512, 'hidden_dim': 512, 'epochs': 1, 'lr': 0.001, 'sparsit
 2025-02-23 18:03:31,181 INFO    MainThread:3993732 [wandb_run.py:_redirect():2317] Redirects installed.
 2025-02-23 18:03:31,185 INFO    MainThread:3993732 [wandb_init.py:init():1037] run started, returning control to user process
 2025-02-23 18:03:33,524 INFO    MainThread:3993732 [wandb_watch.py:_watch():71] Watching
+2025-02-23 18:20:08,712 INFO    MainThread:3993732 [wandb_run.py:_finish():2112] finishing run tux-tu-kth-royal-institute-of-technology/ternary_sae/crw2oxei
+2025-02-23 18:20:08,712 INFO    MainThread:3993732 [wandb_run.py:_atexit_cleanup():2342] got exitcode: 0
+2025-02-23 18:20:08,713 INFO    MainThread:3993732 [wandb_run.py:_restore():2324] restore
+2025-02-23 18:20:08,713 INFO    MainThread:3993732 [wandb_run.py:_restore():2330] restore done
+2025-02-23 18:20:10,754 INFO    MsgRouterThr:3993732 [mailbox.py:close():115] Closing mailbox, abandoning 1 handles.
+2025-02-23 18:20:10,756 INFO    MainThread:3993732 [wandb_run.py:_footer_history_summary_info():3958] rendering history
+2025-02-23 18:20:10,757 INFO    MainThread:3993732 [wandb_run.py:_footer_history_summary_info():3990] rendering summary
+2025-02-23 18:20:10,758 INFO    MainThread:3993732 [wandb_run.py:_footer_sync_info():3919] logging synced files

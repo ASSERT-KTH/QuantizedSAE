@@ -3,16 +3,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import wandb
+import os
 import time
 
 class STEWeights(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.threshold = 0.33 # For ternary SAE
         nn.init.kaiming_normal_(self.weight)
         
     def forward(self, x):
-        hard_weights = torch.clamp(self.weight, -1, 1)  # Ternary SAE
+        sign_weight = torch.sign(self.weight)
+        mask = (torch.abs(self.weight) >= self.threshold).float()
+        hard_weights = sign_weight * mask # Ternary SAE
         # hard_weights = torch.sign(self.weight)  # Binary
         return F.linear(x, hard_weights + (self.weight - self.weight.detach()))
 
@@ -56,16 +60,9 @@ class HiddenStatesTorchDataset(Dataset):
         sample = sample.float()
         return sample
 
-def train(dataset, config):
-    # Initialize W&B
-    wandb.init(project="ternary_sae", config=config)
+def train(model, dataset, config, wandb):
     
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = "cpu"
-    model = TernarySparseAutoencoder(config["input_dim"], config["hidden_dim"]).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
-    
-    wandb.watch(model, log="all", log_freq=100)
 
     dataloader = DataLoader(dataset, batch_size=config["batch_size"], shuffle=True, num_workers=4)
     
@@ -82,14 +79,16 @@ def train(dataset, config):
         loss.backward()
         optimizer.step()
         
+        dead_neurons = (h == 0).sum(dim=1).float().mean().item()
+
         # Log metrics
         wandb.log({
             "loss": loss/config["batch_size"],
             "recon_loss": recon_loss.item(),
-            "sparsity_loss": sparsity_loss.item()
+            "sparsity_loss": sparsity_loss.item(),
+            "dead_neurons": dead_neurons
         })
         
-    wandb.finish()
     return model
 
 # Configuration
@@ -102,11 +101,33 @@ config = {
     "batch_size": 128
 }
 
+hidden_dim = config["hidden_dim"]
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
+
+model = TernarySparseAutoencoder(config["input_dim"], config["hidden_dim"]).to(device)
+
+model_path = f"SAEs/t_sae_hidden_{hidden_dim}.pth"
+if os.path.exists(model_path):
+    print(f"{model_path} exists.")
+    model.load_state_dict(torch.load(model_path)).to(device)
+
+chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
+
+# Initialize W&B
+wandb.init(project="ternary_sae", config=config)
+wandb.watch(model, log="all", log_freq=1000)
+
 # Start training
 total_start = time.perf_counter()
+for f in chunk_files:
+    print(f"Training on {f}:")
+    dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
+    train(model, dataset, config, wandb)
 
-dataset = HiddenStatesTorchDataset("dataset/the_pile_hidden_states_L3_10.pt")
-model = train(dataset, config)
-
+wandb.finish()
+torch.save(model.state_dict(), model_path)
+print(f"Training completed. Model been saved to {model_path}.")
 total_time = time.perf_counter() - total_start
 print(f"Total training time: {total_time:.2f} seconds")
