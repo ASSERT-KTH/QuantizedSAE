@@ -14,11 +14,15 @@ class STEWeights(nn.Module):
         nn.init.kaiming_normal_(self.weight)
         
     def forward(self, x):
+        # FP:
+        # return F.linear(x, self.weight)
+
+        # Ternary:
         sign_weight = torch.sign(self.weight)
         mask = (torch.abs(self.weight) >= self.threshold).float()
         hard_weights = sign_weight * mask # Ternary SAE
         # hard_weights = torch.sign(self.weight)  # Binary
-        return F.linear(x, hard_weights + (self.weight - self.weight.detach()))
+        return F.linear(x, self.weight + (hard_weights - self.weight).detach())
 
 class TernarySparseAutoencoder(nn.Module):
     def __init__(self, input_dim, hidden_dim):
@@ -60,7 +64,7 @@ class HiddenStatesTorchDataset(Dataset):
         sample = sample.float()
         return sample
 
-def train(model, dataset, config, wandb):
+def train(model, dataset, config, wandb, epoch, no_log=False):
     
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
 
@@ -73,7 +77,10 @@ def train(model, dataset, config, wandb):
         
         recon_loss = F.mse_loss(recon, batch)
         sparsity_loss = torch.mean(torch.abs(h))
-        loss = recon_loss + config["sparsity_lambda"] * sparsity_loss
+        if epoch < 2:
+            loss = recon_loss
+        else:
+            loss = recon_loss + config["sparsity_lambda"] * sparsity_loss
         
         optimizer.zero_grad()
         loss.backward()
@@ -81,24 +88,25 @@ def train(model, dataset, config, wandb):
         
         dead_neurons = (h == 0).sum(dim=1).float().mean().item()
 
-        # Log metrics
-        wandb.log({
-            "loss": loss/config["batch_size"],
-            "recon_loss": recon_loss.item(),
-            "sparsity_loss": sparsity_loss.item(),
-            "dead_neurons": dead_neurons
-        })
+        if not no_log:
+            # Log metrics
+            wandb.log({
+                "loss": loss,
+                "recon_loss": recon_loss.item(),
+                "sparsity_loss": sparsity_loss.item(),
+                "dead_neurons": dead_neurons
+            })
         
     return model
 
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 512,
+    "hidden_dim": 4096,
     "epochs": 1,
     "lr": 1e-3,
     "sparsity_lambda": 1e-4,
-    "batch_size": 128
+    "batch_size": 8192
 }
 
 hidden_dim = config["hidden_dim"]
@@ -115,18 +123,22 @@ if os.path.exists(model_path):
 
 chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
 
+no_log = False
+
 # Initialize W&B
-wandb.init(project="ternary_sae", config=config)
-wandb.watch(model, log="all", log_freq=1000)
+if not no_log:
+    wandb.init(project="ternary_sae", config=config)
+    wandb.watch(model, log="all", log_freq=1000)
 
 # Start training
 total_start = time.perf_counter()
-for f in chunk_files:
+for epoch, f in enumerate(chunk_files):
     print(f"Training on {f}:")
     dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
-    train(model, dataset, config, wandb)
+    train(model, dataset, config, wandb, epoch, no_log)
 
-wandb.finish()
+if not no_log:
+    wandb.finish()
 torch.save(model.state_dict(), model_path)
 print(f"Training completed. Model been saved to {model_path}.")
 total_time = time.perf_counter() - total_start
