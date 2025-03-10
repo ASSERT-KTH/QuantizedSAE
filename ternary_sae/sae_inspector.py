@@ -1,21 +1,25 @@
 import torch
 import os
+import json
 from collections import Counter
-from ternary_sae import TernarySparseAutoencoder
+from ternary_sae import *
+from detokenizer import *
+from anthropic_handler import *
 
 class TernarySparseAutoencoderInspector():
 
     def __init__(self, config):
-        self.model = TernarySparseAutoencoder(**config)
+        self.sae = TernarySparseAutoencoder(**config)
+        self.agent = AnthropicHandler(model="claude-3-haiku@20240307")
         model_path = f"SAEs/t_sae_hidden_{config['hidden_dim']}.pth"
         if os.path.exists(model_path):
             print(f"{model_path} exists.")
-            self.model.load_state_dict(torch.load(model_path))
+            self.sae.load_state_dict(torch.load(model_path))
         else:
             return
 
-        weight = self.model.decoder.weight
-        threshold = self.model.decoder.threshold
+        weight = self.sae.decoder.weight
+        threshold = self.sae.decoder.threshold
 
         sign_weight = torch.sign(weight)
         mask = (torch.abs(weight) >= threshold).float()
@@ -61,16 +65,129 @@ class TernarySparseAutoencoderInspector():
         for i in range(first_row):
             print(self.dictionary_in_fp[i])
             print(self.dictionary_in_ternary[i])
-            pass
+    
+    def linguistic_analyze(self, dataset):
+        
+        feature_activations = []
+        progress = 0
+        with torch.no_grad():
+            for context in dataset:
+                h, _ = self.sae(context)
+                _, indices = torch.max(h, dim=1)
+                feature_activations.append(indices.tolist())
+                progress += 1
+                print(progress)
+        
+        return feature_activations
+    
+    def print_feature_activations_overview(self, feature_activations):
+        feature_dict = {}
+
+        for line, id_lst in enumerate(feature_activations):
+            for pos, id in enumerate(id_lst):
+                if id in feature_dict:
+                    feature_dict[id]["cnt"] += 1
+                    if line not in feature_dict[id]["pos"]:
+                        feature_dict[id]["pos"].append((line, pos))
+                else:
+                    feature_dict[id] = {"cnt": 1, "pos": [(line, pos)]}
+                
+        print(len(feature_dict))
+
+        cnt_dict = {key: value['cnt'] for key, value in feature_dict.items()}
+        print(cnt_dict)
+        return feature_dict
+    
+    def evaluate_feature(self, description, feature_idx):
+        prompt = f"""
+            ### Feature #{feature_idx} Analysis
+            {description}
+
+            Based on the examples above, please provide:
+
+            1. A concise summary label describing what linguistic or semantic property this feature represents.
+            2. A brief detailed explanation supporting your interpretation.
+
+            Your response should follow this format:
+
+            Feature #{feature_idx}:
+            - **Feature summary:** [Your concise label here]
+            - **Detailed explanation:** [Your brief explanation here]
+            """
+
+        return self.agent.get_response(prompt)
+
+    def feature_labeling(self, feature_dict, dataset):
+
+        feature_labels = {}
+
+        max_description = 20
+        max_features = 5
+
+        feature_cnt = 0
+
+        for feature in feature_dict:
+            description = ""
+
+            prev_line = -1
+            description_cnt = 0
+
+            for line, pos in feature['pos']:
+                if line != prev_line:
+                    description += "\nOriginal sequence: " + dataset[line]
+                    prev_line = line
+                # else:
+                #     continue
+                description += "'\nMost activated token is {" + dataset[line][pos] + f"}} in position {pos}."
+                description_cnt += 1
+
+                if description_cnt >= max_description:
+                    break
+
+            feature_labels[feature] = self.evaluate_feature(description)
+            feature_cnt += 1
+
+            if feature_cnt > max_features:
+                break
+        
+        return feature_labels
+    
+    def save_features_json(feature_labels, filename):
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(feature_labels, f, 
+                     indent=4, ensure_ascii=False,
+                     default=lambda o: o.__dict__)
+
 
 model_config = {
     'input_dim': 512,
     'hidden_dim': 4096
 }
 
+# chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt') and int(f[len('the_pile_hidden_states_L3_'):-len('.pt')]) <= 100]
+
 inspector = TernarySparseAutoencoderInspector(model_config)
+
+# for f in chunk_files:
+#     data = torch.load(os.path.join("dataset/", f), map_location='cpu')
+#     num_contexts, tokens_per_context, feature_dim = data.shape
+#     feature_activations = inspector.linguistic_analyze(data)
+#     torch.save(feature_activations, f[:-3]+"_overview.pt")
+#     break
+
+batch_count = 35
+feature_activation = torch.load("the_pile_hidden_states_L3_35_overview.pt")
+feature_dict = inspector.print_feature_activations_overview(feature_activation)
+
+print(f"Total amount of most activated features is: {len(torch.unique(torch.tensor(feature_activation)))}.")
+detokenizer = TokenDetokenizer()
+token_id_lst = detokenizer.load_dataset(f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
+token_lst = detokenizer.detokenize_batch(token_id_lst)
+
+feature_labels = inspector.feature_labeling(feature_dict, token_lst)
+inspector.save_features_json(feature_labels, f"feature_labels/batch_{batch_count}_sae_{model_config['hidden_dim']}.json")
+
 inspector.print_dictionary()
 inspector.analyze_ternary_distribution()
 zero_entries = inspector.zero_entries()
 duplicates = inspector.count_duplicates()
-print(duplicates)
