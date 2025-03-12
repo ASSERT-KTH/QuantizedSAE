@@ -6,11 +6,19 @@ from ternary_sae import *
 from detokenizer import *
 from anthropic_handler import *
 
+def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / total))
+    filled_length = int(length * iteration // total)
+    bar = fill * filled_length + '-' * (length - filled_length)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end='\r')
+    if iteration == total:
+        print()
+
 class TernarySparseAutoencoderInspector():
 
     def __init__(self, config):
         self.sae = TernarySparseAutoencoder(**config)
-        self.agent = AnthropicHandler(model="claude-3-haiku@20240307")
+        self.agent = AnthropicHandler(model="claude-3-haiku-20240307")
         model_path = f"SAEs/t_sae_hidden_{config['hidden_dim']}.pth"
         if os.path.exists(model_path):
             print(f"{model_path} exists.")
@@ -26,6 +34,8 @@ class TernarySparseAutoencoderInspector():
         hard_weights = sign_weight * mask # Ternary SAE
         self.dictionary_in_fp = weight.permute(1, 0).contiguous()
         self.dictionary_in_ternary = hard_weights.permute(1, 0).contiguous()
+
+        print("Inspector initialized!")
     
     def analyze_ternary_distribution(self):
 
@@ -83,19 +93,24 @@ class TernarySparseAutoencoderInspector():
     def print_feature_activations_overview(self, feature_activations):
         feature_dict = {}
 
+        print(f"There are {len(feature_activations)} lines and each line with {len(feature_activations[0])} tokens.")
+        print("Start analyzing the feature activation......")
         for line, id_lst in enumerate(feature_activations):
             for pos, id in enumerate(id_lst):
                 if id in feature_dict:
                     feature_dict[id]["cnt"] += 1
-                    if line not in feature_dict[id]["pos"]:
-                        feature_dict[id]["pos"].append((line, pos))
+                    # if not any(tup[0] == line for tup in feature_dict[id]["pos"]):
+                    #     feature_dict[id]["pos"].append((line, pos))
+                    feature_dict[id]["pos"].append((line, pos))
                 else:
                     feature_dict[id] = {"cnt": 1, "pos": [(line, pos)]}
                 
-        print(len(feature_dict))
+                print_progress_bar(line*len(id_lst)+pos, len(id_lst)*len(feature_activations))
+                
+        print(f"There are {len(feature_dict)} features fire as the most activated feature for at least once.")
 
-        cnt_dict = {key: value['cnt'] for key, value in feature_dict.items()}
-        print(cnt_dict)
+        # cnt_dict = {key: value['cnt'] for key, value in feature_dict.items()}
+        # print(cnt_dict)
         return feature_dict
     
     def evaluate_feature(self, description, feature_idx):
@@ -132,9 +147,11 @@ class TernarySparseAutoencoderInspector():
             prev_line = -1
             description_cnt = 0
 
-            for line, pos in feature['pos']:
+            for pos_inf in feature_dict[feature]['pos']:
+                line = pos_inf[0]
+                pos = pos_inf[1]
                 if line != prev_line:
-                    description += "\nOriginal sequence: " + dataset[line]
+                    description += "\nOriginal sequence: " + ''.join(dataset[line])
                     prev_line = line
                 # else:
                 #     continue
@@ -144,7 +161,7 @@ class TernarySparseAutoencoderInspector():
                 if description_cnt >= max_description:
                     break
 
-            feature_labels[feature] = self.evaluate_feature(description)
+            feature_labels[feature]= {"description": description, "interpretation": self.evaluate_feature(description, feature)}
             feature_cnt += 1
 
             if feature_cnt > max_features:
@@ -152,7 +169,7 @@ class TernarySparseAutoencoderInspector():
         
         return feature_labels
     
-    def save_features_json(feature_labels, filename):
+    def save_features_json(self, feature_labels, filename):
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(feature_labels, f, 
                      indent=4, ensure_ascii=False,
@@ -184,6 +201,7 @@ detokenizer = TokenDetokenizer()
 token_id_lst = detokenizer.load_dataset(f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
 token_lst = detokenizer.detokenize_batch(token_id_lst)
 
+print("Begin labeling......")
 feature_labels = inspector.feature_labeling(feature_dict, token_lst)
 inspector.save_features_json(feature_labels, f"feature_labels/batch_{batch_count}_sae_{model_config['hidden_dim']}.json")
 
