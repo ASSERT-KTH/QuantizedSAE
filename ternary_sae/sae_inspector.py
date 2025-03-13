@@ -175,37 +175,72 @@ class TernarySparseAutoencoderInspector():
                      indent=4, ensure_ascii=False,
                      default=lambda o: o.__dict__)
 
+    def check_sensitivity(self, feature_activations, dataset, target_tokens, feature_id):
+        sensitivity_score = 0
+        target_token_appearance = 0
+
+        for line, token_seq in enumerate(dataset):
+            for pos, token in enumerate(token_seq):
+                if any(target_token in token for target_token in target_tokens):
+                    target_token_appearance += 1
+                    if feature_activations[line][pos] == feature_id:
+                        sensitivity_score += 1
+        
+        print(f"Target tokens has appeared {target_token_appearance} times in the dataset.")
+        print(f"The feature {feature_id} as mostly activated {sensitivity_score}.")
+
+        return sensitivity_score / target_token_appearance
+
+    def check_specificity(self, feature_dict, dataset, target_tokens, feature_id):
+        specificity_score = 0
+
+        for (line, pos) in feature_dict[feature_id]["pos"]:
+            if any(target_token in dataset[line][pos] for target_token in target_tokens):
+                specificity_score += 1
+        
+        print(f"The feature {feature_id} has been the most activated feature for {feature_dict[feature_id]['cnt']} times in the dataset.")
+        print(f"The feature {feature_id} activated {specificity_score} times on the target tokens.")
+
+        return specificity_score / feature_dict[feature_id]["cnt"]
 
 model_config = {
     'input_dim': 512,
     'hidden_dim': 4096
 }
 
-# chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt') and int(f[len('the_pile_hidden_states_L3_'):-len('.pt')]) <= 100]
+chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt') and int(f[len('the_pile_hidden_states_L3_'):-len('.pt')]) == 27]
 
 inspector = TernarySparseAutoencoderInspector(model_config)
 
-# for f in chunk_files:
-#     data = torch.load(os.path.join("dataset/", f), map_location='cpu')
-#     num_contexts, tokens_per_context, feature_dim = data.shape
-#     feature_activations = inspector.linguistic_analyze(data)
-#     torch.save(feature_activations, f[:-3]+"_overview.pt")
-#     break
+for f in chunk_files:
+    data = torch.load(os.path.join("dataset/", f), map_location='cpu')
+    num_contexts, tokens_per_context, feature_dim = data.shape
+    feature_activations = inspector.linguistic_analyze(data)
+    torch.save(feature_activations, f[:-3]+"_overview.pt")
+    break
 
-batch_count = 35
-feature_activation = torch.load("the_pile_hidden_states_L3_35_overview.pt")
-feature_dict = inspector.print_feature_activations_overview(feature_activation)
+batch_count = 27
+feature_activations = torch.load("the_pile_hidden_states_L3_27_overview.pt")
+feature_dict = inspector.print_feature_activations_overview(feature_activations)
 
-print(f"Total amount of most activated features is: {len(torch.unique(torch.tensor(feature_activation)))}.")
+print(f"Total amount of most activated features is: {len(torch.unique(torch.tensor(feature_activations)))}.")
 detokenizer = TokenDetokenizer()
 token_id_lst = detokenizer.load_dataset(f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
 token_lst = detokenizer.detokenize_batch(token_id_lst)
 
-print("Begin labeling......")
-feature_labels = inspector.feature_labeling(feature_dict, token_lst)
-inspector.save_features_json(feature_labels, f"feature_labels/batch_{batch_count}_sae_{model_config['hidden_dim']}.json")
+# inspector.check_specificity(feature_dict, token_lst, ["it", "It"], 3624)
+# inspector.check_sensitivity(feature_activations, token_lst, ["it", "It"], 3624)
 
-inspector.print_dictionary()
-inspector.analyze_ternary_distribution()
-zero_entries = inspector.zero_entries()
-duplicates = inspector.count_duplicates()
+inspector.check_specificity(feature_dict, token_lst, ["I", "Me", "me"], 807)
+inspector.check_sensitivity(feature_activations, token_lst, ["I", "Me", "me"], 807)
+
+inspector.check_specificity(feature_dict, token_lst, ["I", "Me", "me", "We", "we", "us"], 807)
+inspector.check_sensitivity(feature_activations, token_lst, ["I", "Me", "me", "We", "we", "us"], 807)
+# print("Begin labeling......")
+# feature_labels = inspector.feature_labeling(feature_dict, token_lst)
+# inspector.save_features_json(feature_labels, f"feature_labels/batch_{batch_count}_sae_{model_config['hidden_dim']}.json")
+# 
+# inspector.print_dictionary()
+# inspector.analyze_ternary_distribution()
+# zero_entries = inspector.zero_entries()
+# duplicates = inspector.count_duplicates()

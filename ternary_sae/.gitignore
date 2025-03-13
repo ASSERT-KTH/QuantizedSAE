@@ -13,3 +13,4 @@ feature_labels/*
 
 nohop.out
 log.out
+*.pt
