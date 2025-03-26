@@ -290,6 +290,12 @@ class TernarySparseAutoencoderInspector():
         print(f"The feature {feature_id} activated {specificity_score} times on the target tokens.")
 
         return specificity_score / feature_dict[feature_id]["cnt"]
+    
+    def sparsity_rate(self):
+        dictionary_size = self.dictionary_in_ternary.numel()
+        zeros = torch.sum(self.dictionary_in_ternary == 0).item()
+
+        return zeros / dictionary_size
 
 model_config = {
     'input_dim': 512,
@@ -300,17 +306,19 @@ model_config = {
 
 inspector = TernarySparseAutoencoderInspector(model_config)
 
-num_cluster = 16
-cluster_ids_x, cluster_centroids, cluster_ids_by_group, center_features = inspector.k_means_analysis(num_cluster)
-print(cluster_ids_x)
-print(cluster_centroids)
-print(f"The center of the {num_cluster} groups are:")
-print(center_features)
-print(cluster_ids_x[807])
-print(cluster_ids_x[3624])
+print(inspector.sparsity_rate())
 
-batch_count = 27
-feature_activations = torch.load(f"the_pile_hidden_states_L3_{batch_count}_overview.pt")
+# num_cluster = 16
+# cluster_ids_x, cluster_centroids, cluster_ids_by_group, center_features = inspector.k_means_analysis(num_cluster)
+# print(cluster_ids_x)
+# print(cluster_centroids)
+# print(f"The center of the {num_cluster} groups are:")
+# print(center_features)
+# print(cluster_ids_x[807])
+# print(cluster_ids_x[3624])
+# 
+# batch_count = 27
+# feature_activations = torch.load(f"the_pile_hidden_states_L3_{batch_count}_overview.pt")
 # if os.path.exists(f"the_pile_hidden_states_L3_{batch_count}_overview_feature_dict"):
 #     with open(f'the_pile_hidden_states_L3_{batch_count}_overview_feature_dict', 'wb') as f:
 #         feature_dict = json.load(f)
@@ -319,12 +327,12 @@ feature_activations = torch.load(f"the_pile_hidden_states_L3_{batch_count}_overv
     # with open(f'the_pile_hidden_states_L3_{batch_count}_overview_feature_dict', 'wb') as f:
     #     json.dump(feature_dict, f)
     # torch.save(f"the_pile_hidden_states_L3_{batch_count}_overview_feature_dict.pt")
-feature_dict = inspector.print_feature_activations_overview(feature_activations)
-detokenizer = TokenDetokenizer()
-token_id_lst = detokenizer.load_dataset(f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
-token_lst = detokenizer.detokenize_batch(token_id_lst)
-feature_labels = inspector.feature_labeling(feature_dict, token_lst, center_features)
-inspector.save_features_json(feature_labels, f"feature_labels/interpretation_of_{num_cluster}_clusters_centers.json")
+# feature_dict = inspector.print_feature_activations_overview(feature_activations)
+# detokenizer = TokenDetokenizer()
+# token_id_lst = detokenizer.load_dataset(f"dataset/the_pile_deduplicated_4m_{batch_count}.pt")
+# token_lst = detokenizer.detokenize_batch(token_id_lst)
+# feature_labels = inspector.feature_labeling(feature_dict, token_lst, center_features)
+# inspector.save_features_json(feature_labels, f"feature_labels/interpretation_of_{num_cluster}_clusters_centers.json")
 
 # Feature analysis in general
 # inspector.get_feature(807)
