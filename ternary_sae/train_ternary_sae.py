@@ -5,9 +5,10 @@ from torch.utils.data import Dataset, DataLoader
 import wandb
 import os
 import time
+import math
 from ternary_sae import *
 
-def train(model, dataset, config, wandb, epoch, no_log=False):
+def train(model, dataset, config, wandb, epoch, no_log=False, rigL=False, f_decay=None):
     
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
 
@@ -27,6 +28,10 @@ def train(model, dataset, config, wandb, epoch, no_log=False):
         
         optimizer.zero_grad()
         loss.backward()
+
+        if rigL == True:
+            model.decoder.mask_grad()
+
         optimizer.step()
         
         dead_neurons = (h == 0).sum(dim=1).float().mean().item()
@@ -59,7 +64,7 @@ device = "cpu"
 
 model = TernarySparseAutoencoder(config["input_dim"], config["hidden_dim"]).to(device)
 
-model_path = f"SAEs/t_sae_hidden_{hidden_dim}.pth"
+model_path = f"SAEs/t_sae_hidden_{hidden_dim}_rigL_by_chunk.pth"
 if os.path.exists(model_path):
     print(f"{model_path} exists.")
     model.load_state_dict(torch.load(model_path)).to(device)
@@ -70,18 +75,23 @@ no_log = False
 
 # Initialize W&B
 if not no_log:
-    wandb.init(project="ternary_sae", config=config)
+    wandb.init(project="ternary_sae_rigL_by_chunk", config=config)
     wandb.watch(model, log="all", log_freq=1000)
 
 # Start training
+rigL = True
+connection_fraction_to_update = 0.3
 total_start = time.perf_counter()
 for epoch, f in enumerate(chunk_files):
     print(f"Training on {f}:")
     dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
-    train(model, dataset, config, wandb, epoch, no_log)
+    f_decay = connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(chunk_files)))
+    model.decoder.update_mask(f_decay, 0.7)
+    train(model, dataset, config, wandb, epoch, no_log, rigL=rigL, f_decay=f_decay)
 
 if not no_log:
     wandb.finish()
+
 torch.save(model.state_dict(), model_path)
 print(f"Training completed. Model been saved to {model_path}.")
 total_time = time.perf_counter() - total_start
