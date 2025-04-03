@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..baseSAE import SAE
 
-def binaryLatentSAE(SAE):
+def BinaryLatentSAE(SAE):
 
     def __init__(self, input_dim, hidden_dim):
 
@@ -23,4 +23,4 @@ def binaryLatentSAE(SAE):
             binary_latent = (latent >= 0.5).float()
 
         reconstruction = self.decode(latent + (binary_latent - latent).detach())
-        return latent, reconstruction
+        return binary_latent, reconstruction
