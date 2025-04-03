@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ..baseSAE import SAE
+from baseSAE.SAE import SparseAutoencoder
 
-def BinaryLatentSAE(SAE):
+class BinaryLatentSAE(SparseAutoencoder):
 
     def __init__(self, input_dim, hidden_dim):
 
-        super.__init__(input_dim, hidden_dim)
+        super().__init__(input_dim, hidden_dim)
 
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),

@@ -12,26 +12,43 @@ from binary_latent_SAE import *
 
 class Trainer():
 
-    def __init__(self, config, model_path, sae_type):
+    def __init__(self, config, sae_type, rigL=False, no_log=False, proj_name=None):
         self.config = config
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = "cpu"
+
+        self.sae_type = sae_type
 
         if sae_type == "t_sae":
             self.model = TernarySparseAutoencoder(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
         elif sae_type == "bl_sae":
             self.model = BinaryLatentSAE(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
 
-    def train(self, model, dataset, wandb, epoch, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
+        self.epoch = 0
+        self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.config["lr"])
+        # rigL settings:
+        self.rigL = rigL
+        self.connection_fraction_to_update = 0.3
+
+        self.model_path = "SAEs/" + sae_type + "_" + self.config["hidden_dim"] + "rigL" if rigL else "" + ".pth"
+
+        # Initialize W&B
+        self.no_log = no_log
+        if not self.no_log:
+            wandb.init(project=proj_name, config=config)
+            wandb.watch(self.model, log="all", log_freq=1000)
+
+    def one_epoch(self, dataset, wandb, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
+
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
 
         dataloader = DataLoader(dataset, batch_size=self.config["batch_size"], shuffle=True, num_workers=4)
 
         for batch in dataloader:
-            batch = batch.to(device)
+            batch = batch.to(self.device)
 
-            latent, recon = model(batch)
+            latent, recon = self.model(batch)
 
             recon_loss = F.mse_loss(recon, batch)
             sparsity_loss = torch.mean(torch.abs(latent))
@@ -46,12 +63,12 @@ class Trainer():
             loss.backward()
 
             if rigL == True:
-                model.decoder.mask_grad()
+                self.model.decoder.mask_grad()
 
             optimizer.step()
 
             # For binary latent:
-            dead_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
+            inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
 
             # For ReLU:
             # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
@@ -62,10 +79,33 @@ class Trainer():
                     "loss": loss,
                     "recon_loss": recon_loss.item(),
                     "sparsity_loss": sparsity_loss.item(),
-                    "dead_neurons": dead_neurons
+                    "inactivated_neurons": inactivated_neurons
+                    # "dead_neurons": dead_neurons
                 })
 
-        return model
+        return self.model
+    
+    def train(self):
+
+        total_start = time.perf_counter()
+
+        for epoch, f in enumerate(self.chunk_files):
+            print(f"Training on {f}:")
+            dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
+            if self.rigL:
+                f_decay = self.connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(self.chunk_files)))
+                self.model.decoder.update_mask(f_decay, 0.7)
+            else:
+                f_decay = None
+            self.one_epoch(dataset, wandb, dead_neuron_threshold=0.2, no_log=self.no_log, rigL=self.rigL, f_decay=f_decay)
+
+        if not self.no_log:
+            wandb.finish()
+
+        torch.save(self.model.state_dict(), self.model_path)
+        print(f"Training completed. Model been saved to {self.model_path}.")
+        total_time = time.perf_counter() - total_start
+        print(f"Total training time: {total_time:.2f} seconds")
 
 # Configuration
 config = {
@@ -77,47 +117,6 @@ config = {
     "batch_size": 100000
 }
 
-hidden_dim = config["hidden_dim"]
+trainer = Trainer(config, "bl_sae", False, False, "1st_binary_latent_training")
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cpu"
-
-model = TernarySparseAutoencoder(config["input_dim"], config["hidden_dim"]).to(device)
-
-model_path = f"SAEs/t_sae_hidden_{hidden_dim}_rigL_by_chunk.pth"
-# if os.path.exists(model_path):
-#     print(f"{model_path} exists.")
-#     model.load_state_dict(torch.load(model_path)).to(device)
-
-chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
-
-no_log = False
-
-# Initialize W&B
-if not no_log:
-    wandb.init(project="ternary_sae_rigL_by_chunk", config=config)
-    wandb.watch(model, log="all", log_freq=1000)
-
-# Start training
-rigL = False
-connection_fraction_to_update = 0.3
-total_start = time.perf_counter()
-if rigL:
-    model.decoder.init_mask(0.7)
-for epoch, f in enumerate(chunk_files):
-    print(f"Training on {f}:")
-    dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
-    if rigL:
-        f_decay = connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(chunk_files)))
-        model.decoder.update_mask(f_decay, 0.7)
-    else:
-        f_decay = None
-    train(model, dataset, config, wandb, epoch, no_log, rigL=rigL, f_decay=f_decay)
-
-if not no_log:
-    wandb.finish()
-
-torch.save(model.state_dict(), model_path)
-print(f"Training completed. Model been saved to {model_path}.")
-total_time = time.perf_counter() - total_start
-print(f"Total training time: {total_time:.2f} seconds")
+trainer.train()
