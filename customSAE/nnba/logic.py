@@ -58,7 +58,7 @@ class XOR(nn.Module):
         out_nand = self.nand_gate(x)
         out_or = self.or_gate(x)
 
-        in_and = torch.cat((out_or, out_nand), dim=1)
+        in_and = torch.cat((out_or, out_nand), dim=-1)
 
         return self.and_gate(in_and)
 
