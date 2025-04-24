@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from logic import *
+from .logic import *
+# from logic import *
 
 class half_adder(nn.Module):
 
@@ -45,6 +46,7 @@ class ripple_carry_adder(nn.Module):
     def forward(self, x, y):
 
         output = torch.zeros_like(x)
+        carry = torch.zeros_like(x)
 
         for i in range(self.n_bits):
             input = torch.concat((x[:, i].unsqueeze(1), y[:, i].unsqueeze(1)), dim=1)
@@ -53,13 +55,16 @@ class ripple_carry_adder(nn.Module):
             else:
                 out_t, c_out = self.fa(input, c_out)
             
+            carry[:, i] = c_out.squeeze()
+            
             output[:, i] = out_t.squeeze()
         
-        return output
+        return output, carry
 
 class carry_save_adder(nn.Module):
 
     def __init__(self, n_bits):
+
         super().__init__()
         self.n_bits = n_bits
 
@@ -78,17 +83,26 @@ class carry_save_adder(nn.Module):
         elif len_x == 2:
             return self.rca(x[:, 0], x[:, 1])
         else:
+            carry = torch.zeros_like(x[:, 1].unsqueeze(-1))
+
             in_0 = x[:, 0].unsqueeze(-1)
-            carry = x[:, 1].unsqueeze(-1)
+            t_carry = x[:, 1].unsqueeze(-1)
+
             for i in range(len_x-2):
                 if not mask[i+2]:
                     continue
 
                 in_1 = x[:, i+2].unsqueeze(-1)
 
-                in_0, carry = self.fa(torch.concat((in_0, in_1), dim=-1).squeeze(0), carry)
-                carry = torch.cat((torch.zeros_like(carry[:, 0:1]), carry[:, :-1]), dim=-2)
-            return self.rca(in_0.squeeze(-1), carry.squeeze(-1))
+                in_0, t_carry = self.fa(torch.concat((in_0, in_1), dim=-1).squeeze(0), t_carry)
+                carry += t_carry
+                t_carry = torch.cat((torch.zeros_like(t_carry[:, 0:1]), t_carry[:, :-1]), dim=-2)
+
+            output, t_carry = self.rca(in_0.squeeze(-1), t_carry.squeeze(-1))
+
+            carry = carry.squeeze(-1) + t_carry
+
+            return output, carry
 
 # testing_cases = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
 
@@ -121,35 +135,20 @@ class carry_save_adder(nn.Module):
 #     (13, 9),      # 1101 + 1001
 #     (7, 11)       # 0111 + 1011
 # ]
-# 
-# # Convert to binary tensors (batch_size=8, bits=4)
+# # 
+# # # Convert to binary tensors (batch_size=8, bits=4)
 # x_bin = torch.tensor([[int(b) for b in f"{x:04b}"[::-1]] for x, _ in test_values], dtype=torch.float32)
 # y_bin = torch.tensor([[int(b) for b in f"{y:04b}"[::-1]] for _, y in test_values], dtype=torch.float32)
 # 
 # rca = ripple_carry_adder(4)
 # res = rca(x_bin, y_bin)
-# 
-# for i, (x_dec, y_dec) in enumerate(test_values):
-#     # Convert model output to decimal
-#     sum_bits = res[i].tolist()[::-1]
-#     sum_pred = int("".join(map(str, map(int, sum_bits))), 2)
-#     
-#     # Calculate expected result (including carry overflow)
-#     expected_sum = (x_dec + y_dec) & 0b1111
-#     expected_bits = [int(b) for b in f"{expected_sum:04b}"]  # 5-bit output
-#     
-#     print(f"Test case {i+1}:")
-#     print(f"Input: {x_dec:04b} + {y_dec:04b}")
-#     print(f"Predicted: {sum_pred:04b} ({sum_pred})")
-#     print(f"Expected:  {expected_sum:04b} ({expected_sum})")
-#     print("Status:", "PASS" if sum_pred == expected_sum else "FAIL")
-#     print("-" * 40)
+# print(res)
 
-def construct_binary_list(num, n_bits):
-    return [int(b) for b in f"{num:0{n_bits}b}"[::-1]]
+# def construct_binary_list(num, n_bits):
+#     return [int(b) for b in f"{num:0{n_bits}b}"[::-1]]
 
-testing_case = torch.tensor([[construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(4, 8)], [construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(1, 8)]], dtype=torch.float32)
-print(testing_case)
+# testing_case = torch.tensor([[construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(4, 8)], [construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(1, 8)]], dtype=torch.float32)
+# print(testing_case)
 
-csa = carry_save_adder(8)
-print(csa(testing_case).tolist())
+# csa = carry_save_adder(8)
+# print(csa(testing_case))

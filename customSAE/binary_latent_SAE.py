@@ -23,4 +23,5 @@ class BinaryLatentSAE(SparseAutoencoder):
             binary_latent = (latent >= 0.5).float()
 
         reconstruction = self.decode(latent + (binary_latent - latent).detach())
+
         return binary_latent, reconstruction
