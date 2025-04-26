@@ -34,7 +34,7 @@ class HiddenStatesTorchDataset(Dataset):
 
 class HiddenStatesTorchDatasetInBinary(Dataset):
 
-    def __init__(self, file_path, gamma=3.2, n_bits=4, transform=None):
+    def __init__(self, file_path, gamma=4, n_bits=4, transform=None):
         """
         file_paths: .pt file path. The file is expected to store a tensor 
                     with shape of (num_contexts, tokens_per_context, feature_dim) where
@@ -43,7 +43,10 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
         """
         self.data = torch.load(file_path, map_location='cpu')
         self.transform = transform
+        self.gamma = gamma
         self.n_bits = n_bits
+        self.shift_factor = (2**(self.n_bits - 1))
+        self.scale_factor = self.shift_factor / (self.gamma + 1e-5)
         num_contexts, tokens_per_context, feature_dim = self.data.shape
         
         self.cum_sizes = num_contexts * tokens_per_context
@@ -52,17 +55,34 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
     def __len__(self):
         return self.cum_sizes
 
-    def __getitem__(self, idx):
-        # Map the local index to (context index, token index)
+    def __getoriginalitem__(self, idx): # Map the local index to (context index, token index)
         context_idx = idx // self.files_info[2]
         token_idx = idx % self.files_info[2] 
         sample = self.data[context_idx, token_idx, :]  # Each sample is a 512-d tensor
         
         sample = sample.float()
         return sample
+
+    def __getitem__(self, idx): # Map the local index to (context index, token index)
+        context_idx = idx // self.files_info[2]
+        token_idx = idx % self.files_info[2] 
+        sample = self.data[context_idx, token_idx, :]  # Each sample is a 512-d tensor
+        
+        sample = sample.float()
+        return self.quantize(sample)
     
     def quantize(self, sample):
-        pass
+
+        scaled_sample = sample * self.scale_factor + self.shift_factor 
+        scaled_sample = torch.clamp(scaled_sample, 0, 2**self.n_bits - 1).round().int()
+
+        bit_positions = torch.arange(0, self.n_bits, device=scaled_sample.device)
+    
+        scaled_sample_expanded = scaled_sample.unsqueeze(-1)
+    
+        binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
+    
+        return binary_repr.view(-1)
 
 def compute_statistic(dataset, batch_size=1000):
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
@@ -104,8 +124,6 @@ def compute_statistic(dataset, batch_size=1000):
         # delta = batch_mean - mean
         # mean += delta * batch_samples / n_samples
         # M2 += batch_var * batch_samples + (delta ** 2) * batch_samples * (n_samples - batch_samples) / n_samples
-        n_samples += 1
-        print(n_samples)
 
     plt.figure(figsize=(10, 6))
     plt.hist(data_array, bins=256, density=True, alpha=0.7)
@@ -118,5 +136,7 @@ def compute_statistic(dataset, batch_size=1000):
     # std = torch.sqrt(M2 / n_samples)
     # return mean, std, max_val, min_val
 
-hidden_state_dataset = HiddenStatesTorchDataset(os.path.join("dataset/", "the_pile_hidden_states_L3_35.pt"))
-print(compute_statistic(hidden_state_dataset))
+# hidden_state_dataset = HiddenStatesTorchDatasetInBinary(os.path.join("dataset/", "the_pile_hidden_states_L3_35.pt"), 4, 4)
+# print(hidden_state_dataset.__getitem__(102).shape)
+# print(hidden_state_dataset.__getitem__(102))
+# print(compute_statistic(hidden_state_dataset))
