@@ -15,24 +15,27 @@ class binary_decoder(nn.Module):
 
         self.csa = carry_save_adder(n_bits)
 
+        for param in self.csa.parameters():
+            param.requires_grad = False
+            print(param)
+
         # nn.init.kaiming_normal_(self.weight)
         nn.init.normal_(self.weight, mean=0.5, std=1.0)
         # Clamp outliers to [0, 1]
         self.weight.data.clamp_(0, 1)
 
     def forward(self, x):
-        # Binary:
+        # Binary weights(feature representations):
         with torch.no_grad():
             self.weight.data.clamp_(0, 1)
             hard_weights = self.weight + ((self.weight >= self.threshold).float() - self.weight).detach() # Binary SAE
             x = x.unsqueeze(-1)
         
+        # Reshape features for batch processing:
         filtered_features = (x * hard_weights.unsqueeze(0))
-        print(filtered_features)
-
+        # print(filtered_features)
         features_by_neurons = torch.split(filtered_features, self.n_bits, dim=-1)
-        print(features_by_neurons)
-
+        # print(features_by_neurons)
         features_by_neurons_stack = torch.stack(features_by_neurons, dim=-3)
         features_by_neurons_stack_reshape = features_by_neurons_stack.reshape(-1, features_by_neurons_stack.shape[-2], features_by_neurons_stack.shape[-1])
 
@@ -42,7 +45,7 @@ class binary_decoder(nn.Module):
 
         return sum, carry
 
-class binary_SAE(SparseAutoencoder):
+class BinarySAE(SparseAutoencoder):
 
     def __init__(self, input_dim, hidden_dim, n_bits=8):
 
@@ -72,7 +75,7 @@ class binary_SAE(SparseAutoencoder):
 # # testing_case = torch.tensor([[1, 0, 1]])
 # print(bd(testing_case))
 
-# bin_sae = binary_SAE(2, 4, 2)
+# bin_sae = BinarySAE(1, 1, 1)
 # 
 # testing_case = torch.tensor([[1., 0., 1., 0.], [0., 1., 1., 1.]])
 # print(bin_sae(testing_case))

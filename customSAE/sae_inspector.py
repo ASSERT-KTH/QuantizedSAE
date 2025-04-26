@@ -3,7 +3,7 @@ import torch
 import os
 import json
 from collections import Counter
-from ternary_sae import *
+from ternary_SAE import *
 from detokenizer import *
 from anthropic_handler import *
 from sklearn.neighbors import NearestNeighbors

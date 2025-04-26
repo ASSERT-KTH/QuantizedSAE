@@ -104,6 +104,28 @@ class TransformerInspector:
                 finally:
                     self.remove_hooks()
 
+    def display_hidden_states(self, k):
+
+        input_length = self.inputs["input_ids"].shape[-1]
+
+        hidden_state = self.hidden_states[k][0][0][0]
+        mlp_output = self.mlp_outputs[k][0][0]
+        attn_output = self.attention_outputs[k][0][0]
+
+        # print(f"hidden state of layer {k} is: {self.hidden_states[k][0].shape}")
+        # print(f"mlp output of layer {k} is: {self.mlp_outputs[k].shape}")
+        # print(f"attn output of layer {k} is: {self.attention_outputs[k].shape}")
+
+        # print(f"hidden state of layer {k} is: {hidden_state.shape}")
+        # print(f"mlp output of layer {k} is: {mlp_output.shape}")
+        # print(f"attn output of layer {k} is: {attn_output.shape}")
+
+        print(mlp_output.min())
+        print(hidden_state.min())
+        print(f"hidden state of layer {k} is: {hidden_state}")
+        print(f"mlp output of layer {k} is: {mlp_output}")
+        print(f"attn output of layer {k} is: {attn_output}")
+
     def predict_from_hidden_states(self):
         predictions = {}
         input_length = self.inputs["input_ids"].shape[-1]
@@ -155,14 +177,17 @@ if __name__ == "__main__":
         device=device
     )
 
-    input_text = "Hello, I am"
+    # input_text = "Kobe Bryant is a "
+    input_text = "the capital of the state containing Dallas is "
+
     # input_text = "I want to generate a section of Python code:\ndef hello():\n"
     print("Input text:", input_text)
 
-    # generated_sequence = inspector.generate_text(input_text, max_length=128)
-    # print("Generated sequence:", inspector.tokenizer.batch_decode(outputs.sequences))
+    # generated_sequence = inspector.generate_text(input_text, max_length=32)
+    # print("Generated sequence:", inspector.tokenizer.batch_decode(generated_sequence))
 
     inspector.forward_pass(text=input_text, k=3)
 
+    inspector.display_hidden_states(2)
     predictions = inspector.predict_from_hidden_states()
     inspector.display_predictions(predictions)

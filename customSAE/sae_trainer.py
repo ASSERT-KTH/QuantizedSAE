@@ -9,6 +9,7 @@ import time
 import math
 from ternary_SAE import *
 from binary_latent_SAE import *
+from binary_SAE import *
 
 class Trainer():
 
@@ -23,6 +24,8 @@ class Trainer():
             self.model = TernarySparseAutoencoder(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
         elif sae_type == "bl_sae":
             self.model = BinaryLatentSAE(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
+        elif sae_type == "b_sae":
+            self.model = BinarySAE(self.config["input_dim"], self.config["hidden_dim"], self.config["n_bits"])
 
         self.epoch = 0
         self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
@@ -31,7 +34,7 @@ class Trainer():
         self.rigL = rigL
         self.connection_fraction_to_update = 0.3
 
-        self.model_path = "SAEs/" + sae_type + "_" + self.config["hidden_dim"] + "rigL" if rigL else "" + ".pth"
+        self.model_path = "SAEs/" + sae_type + "_" + str(self.config["hidden_dim"]) + "rigL" if rigL else "" + ".pth"
 
         # Initialize W&B
         self.no_log = no_log
@@ -92,6 +95,7 @@ class Trainer():
         for epoch, f in enumerate(self.chunk_files):
             print(f"Training on {f}:")
             dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
+            # print(f"The dataset size is {dataset.__len__()}.")
             if self.rigL:
                 f_decay = self.connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(self.chunk_files)))
                 self.model.decoder.update_mask(f_decay, 0.7)
@@ -111,12 +115,13 @@ class Trainer():
 config = {
     "input_dim": 512,
     "hidden_dim": 4096,
+    "n_bits": 8,
     "epochs": 1,
     "lr": 1e-3,
     "sparsity_lambda": 1e-4,
     "batch_size": 100000
 }
 
-trainer = Trainer(config, "bl_sae", False, False, "1st_binary_latent_training")
+trainer = Trainer(config, "bl_sae", False, True, "1st_binary_latent_training")
 
 trainer.train()

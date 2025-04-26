@@ -7,7 +7,7 @@ import wandb
 import os
 import time
 import math
-from ternary_sae import *
+from ternary_SAE import *
 
 def train(model, dataset, config, wandb, epoch, no_log=False, rigL=False, f_decay=None):
     
