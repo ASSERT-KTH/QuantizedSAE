@@ -17,7 +17,6 @@ class binary_decoder(nn.Module):
 
         for param in self.csa.parameters():
             param.requires_grad = False
-            print(param)
 
         # nn.init.kaiming_normal_(self.weight)
         nn.init.normal_(self.weight, mean=0.5, std=1.0)
@@ -67,7 +66,8 @@ class BinarySAE(SparseAutoencoder):
         with torch.no_grad():
             binary_latent = (latent >= 0.5).float()
 
-        return self.decode(latent + (binary_latent - latent).detach())
+        recon, carry = self.decode(latent + (binary_latent - latent).detach())
+        return binary_latent, recon, carry
 
 # bd = binary_decoder(3, 2, 2)
 # 
@@ -75,7 +75,8 @@ class BinarySAE(SparseAutoencoder):
 # # testing_case = torch.tensor([[1, 0, 1]])
 # print(bd(testing_case))
 
-# bin_sae = BinarySAE(1, 1, 1)
+# bin_sae = BinarySAE(2, 2, 2)
 # 
 # testing_case = torch.tensor([[1., 0., 1., 0.], [0., 1., 1., 1.]])
 # print(bin_sae(testing_case))
+# latent, out, carry = bin_sae(testing_case)
