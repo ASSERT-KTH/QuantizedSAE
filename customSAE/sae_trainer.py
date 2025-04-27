@@ -15,8 +15,14 @@ class Trainer():
 
     def __init__(self, config, sae_type, rigL=False, no_log=False, proj_name=None):
         self.config = config
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            self.device = torch.device("cpu")
+            print("GPU not available, using CPU")
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.device = "cpu"
+        # self.device = "cpu"
 
         self.sae_type = sae_type
 
@@ -25,7 +31,7 @@ class Trainer():
         elif sae_type == "bl_sae":
             self.model = BinaryLatentSAE(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
         elif sae_type == "b_sae":
-            self.model = BinarySAE(self.config["input_dim"], self.config["hidden_dim"], self.config["n_bits"])
+            self.model = BinarySAE(self.config["input_dim"], self.config["hidden_dim"], self.config["n_bits"]).to(self.device)
 
         self.epoch = 0
         self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
@@ -56,20 +62,19 @@ class Trainer():
             if self.sae_type == 'b_sae':
                 latent, recon, carry = self.model(batch)
 
-                scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])) / 2**self.config["n_bits"]
+                scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device) / 2**self.config["n_bits"]
 
                 batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
 
-                batch *= scale_factor
-                recon *= scale_factor
+                recon_loss = torch.mean(((batch - recon) * scale_factor) ** 2)
                 carry *= scale_factor
 
             else:
+                recon_loss = F.mse_loss(recon, batch)
                 latent, recon = self.model(batch)
 
-            recon_loss = F.mse_loss(recon, batch)
             sparsity_loss = torch.mean(torch.abs(latent))
 
             # if epoch < 2:
@@ -79,8 +84,8 @@ class Trainer():
             loss = recon_loss + self.config["sparsity_lambda"] * sparsity_loss
 
             if self.sae_type == "b_sae":
-                carry_loss = torch.mean(carry ** 2)
-                loss += self.config["carry_lambda"] * carry_loss
+                carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
+                loss +=  carry_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -153,8 +158,8 @@ config = {
     "epochs": 1,
     "lr": 1e-3,
     "sparsity_lambda": 1e-4,
-    "carry_lambda": 1e-4,
-    "batch_size": 10
+    "carry_lambda": 1e-5,
+    "batch_size": 40
 }
 
 no_log = False

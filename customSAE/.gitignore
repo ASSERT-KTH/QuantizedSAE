@@ -13,6 +13,9 @@ SAEs/*
 !feature_labels/.gitkeep
 !SAEs/.gitkeep
 
-nohop.out
+*.out
+*.log
 log.out
 *.pt
+*.sh
+*.sbatch
