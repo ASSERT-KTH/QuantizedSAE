@@ -62,20 +62,24 @@ class Trainer():
             if self.sae_type == 'b_sae':
                 latent, recon, carry = self.model(batch)
 
-                scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device) / 2**self.config["n_bits"]
+                # scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device) / 2**(self.config["n_bits"] - 1)
+
+                scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
+                scale_factor = scale_factor / scale_factor.sum().float()
 
                 batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
 
-                recon_loss = torch.mean(((batch - recon) * scale_factor) ** 2)
+                recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
                 carry *= scale_factor
+                sparsity_loss = torch.mean(latent.sum(dim=-1))
 
             else:
                 recon_loss = F.mse_loss(recon, batch)
                 latent, recon = self.model(batch)
+                sparsity_loss = torch.mean(torch.abs(latent).sum(dim=-1))
 
-            sparsity_loss = torch.mean(torch.abs(latent))
 
             # if epoch < 2:
             #     loss = recon_loss
@@ -84,8 +88,9 @@ class Trainer():
             loss = recon_loss + self.config["sparsity_lambda"] * sparsity_loss
 
             if self.sae_type == "b_sae":
-                carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
-                loss +=  carry_loss
+                carry_loss = torch.mean(carry)
+                # carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
+                # loss +=  carry_loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -96,7 +101,8 @@ class Trainer():
             optimizer.step()
 
             # For binary latent:
-            inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
+            # inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
+            inactivated_neurons = torch.mean(latent.sum(dim=-1))
 
             # For ReLU:
             # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
@@ -152,17 +158,17 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 4096,
+    "hidden_dim": 1024,
     "gamma": 4,
-    "n_bits": 8,
+    "n_bits": 4,
     "epochs": 1,
     "lr": 1e-3,
-    "sparsity_lambda": 1e-4,
-    "carry_lambda": 1e-5,
-    "batch_size": 40
+    "sparsity_lambda": 1e-5,
+    "carry_lambda": 1e-6,
+    "batch_size": 256
 }
 
 no_log = False
-trainer = Trainer(config, "b_sae", False, no_log, "1st_binary_sae_training")
+trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
 
 trainer.train()

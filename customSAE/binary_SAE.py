@@ -17,6 +17,7 @@ class binary_decoder(nn.Module):
 
         for param in self.csa.parameters():
             param.requires_grad = False
+            # param.requires_grad = True
 
         # nn.init.kaiming_normal_(self.weight)
         nn.init.normal_(self.weight, mean=0.5, std=1.0)
@@ -25,10 +26,10 @@ class binary_decoder(nn.Module):
 
     def forward(self, x):
         # Binary weights(feature representations):
-        with torch.no_grad():
-            self.weight.data.clamp_(0, 1)
-            hard_weights = self.weight + ((self.weight >= self.threshold).float() - self.weight).detach() # Binary SAE
-            x = x.unsqueeze(-1)
+        # self.weight.data.clamp_(0, 1) # Problematic part
+        # clamped_weight = self.weight.clamp(0, 1)
+        hard_weights = self.weight + ((self.weight >= self.threshold).float() - self.weight).detach() # Binary SAE
+        x = x.unsqueeze(-1)
         
         # Reshape features for batch processing:
         filtered_features = (x * hard_weights.unsqueeze(0))
@@ -36,7 +37,7 @@ class binary_decoder(nn.Module):
         features_by_neurons = torch.split(filtered_features, self.n_bits, dim=-1)
         # print(features_by_neurons)
         features_by_neurons_stack = torch.stack(features_by_neurons, dim=-3)
-        features_by_neurons_stack_reshape = features_by_neurons_stack.reshape(-1, features_by_neurons_stack.shape[-2], features_by_neurons_stack.shape[-1])
+        features_by_neurons_stack_reshape = features_by_neurons_stack.view(-1, features_by_neurons_stack.shape[-2], features_by_neurons_stack.shape[-1])
 
         sum, carry = self.csa(features_by_neurons_stack_reshape)
 
@@ -66,7 +67,7 @@ class BinarySAE(SparseAutoencoder):
         with torch.no_grad():
             binary_latent = (latent >= 0.5).float()
 
-        recon, carry = self.decode(latent + (binary_latent - latent).detach())
+        recon, carry = self.decode(latent + binary_latent - latent.detach())
         return binary_latent, recon, carry
 
 # bd = binary_decoder(3, 2, 2)
@@ -75,8 +76,37 @@ class BinarySAE(SparseAutoencoder):
 # # testing_case = torch.tensor([[1, 0, 1]])
 # print(bd(testing_case))
 
+# torch.manual_seed(42)
+# 
 # bin_sae = BinarySAE(2, 2, 2)
 # 
 # testing_case = torch.tensor([[1., 0., 1., 0.], [0., 1., 1., 1.]])
 # print(bin_sae(testing_case))
 # latent, out, carry = bin_sae(testing_case)
+# 
+# scale_factor = torch.pow(2, torch.arange(2))
+# scale_factor = scale_factor / scale_factor.sum().float()
+# # scale_factor = scale_factor
+# 
+# batch = testing_case.view(2, 2, 2)
+# recon = out.view(2, 2, 2)
+# carry = carry.view(2, 2, 2)
+# 
+# recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
+# carry *= scale_factor
+# sparsity_loss = torch.mean(latent.sum(dim=-1))
+# 
+# loss = recon_loss + 1e-6 * sparsity_loss
+# loss.backward()
+# 
+# for name, param in bin_sae.named_parameters():
+#     if param.requires_grad and param.grad is not None:
+#         print(f"grad_norms/{name}: {param.grad.norm()}")
+#         print(f"grad_values/{name}: {param.grad}")
+
+# latent = bin_sae.encoder(testing_case)
+# latent.sum().backward()
+# for name, param in bin_sae.encoder.named_parameters():
+#     if param.requires_grad and param.grad is not None:
+#         print(f"grad_norms/{name}: {param.grad.norm()}")
+#         print(f"grad_values/{name}: {param.grad}")

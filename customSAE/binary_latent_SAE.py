@@ -25,3 +25,18 @@ class BinaryLatentSAE(SparseAutoencoder):
         reconstruction = self.decode(latent + (binary_latent - latent).detach())
 
         return binary_latent, reconstruction
+
+torch.manual_seed(42)
+
+bl_sae = BinaryLatentSAE(2, 2)
+
+testing_cases = torch.tensor([[2, 2], [3, 3]]).float()
+
+binary_latent, recon = bl_sae(testing_cases)
+loss = F.mse_loss(recon, testing_cases)
+loss.backward()
+
+for name, param in bl_sae.named_parameters():
+    if param.requires_grad and param.grad is not None:
+        print(f"grad_norms/{name}: {param.grad.norm()}")
+        print(f"grad_values/{name}: {param.grad}")
