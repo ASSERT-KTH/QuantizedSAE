@@ -77,7 +77,7 @@ class BinarySAE(SparseAutoencoder):
 # print(bd(testing_case))
 
 # torch.manual_seed(42)
-# 
+#  
 # bin_sae = BinarySAE(2, 2, 2)
 # 
 # testing_case = torch.tensor([[1., 0., 1., 0.], [0., 1., 1., 1.]])
@@ -92,7 +92,8 @@ class BinarySAE(SparseAutoencoder):
 # recon = out.view(2, 2, 2)
 # carry = carry.view(2, 2, 2)
 # 
-# recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
+# # recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
+# recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
 # carry *= scale_factor
 # sparsity_loss = torch.mean(latent.sum(dim=-1))
 # 
@@ -103,10 +104,11 @@ class BinarySAE(SparseAutoencoder):
 #     if param.requires_grad and param.grad is not None:
 #         print(f"grad_norms/{name}: {param.grad.norm()}")
 #         print(f"grad_values/{name}: {param.grad}")
-
+# 
 # latent = bin_sae.encoder(testing_case)
 # latent.sum().backward()
 # for name, param in bin_sae.encoder.named_parameters():
 #     if param.requires_grad and param.grad is not None:
 #         print(f"grad_norms/{name}: {param.grad.norm()}")
 #         print(f"grad_values/{name}: {param.grad}")
+# 

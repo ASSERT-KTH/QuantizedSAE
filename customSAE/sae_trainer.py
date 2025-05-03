@@ -62,8 +62,6 @@ class Trainer():
             if self.sae_type == 'b_sae':
                 latent, recon, carry = self.model(batch)
 
-                # scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device) / 2**(self.config["n_bits"] - 1)
-
                 scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
                 scale_factor = scale_factor / scale_factor.sum().float()
 
@@ -72,6 +70,8 @@ class Trainer():
                 carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
 
                 recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
+                # Mean square error is too small
+                # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
                 carry *= scale_factor
                 sparsity_loss = torch.mean(latent.sum(dim=-1))
 
@@ -158,14 +158,14 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 1024,
+    "hidden_dim": 512,
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
     "lr": 1e-3,
     "sparsity_lambda": 1e-5,
     "carry_lambda": 1e-6,
-    "batch_size": 256
+    "batch_size": 512
 }
 
 no_log = False

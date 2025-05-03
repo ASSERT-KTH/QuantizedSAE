@@ -146,9 +146,9 @@ class carry_save_adder(nn.Module):
 
 # def construct_binary_list(num, n_bits):
 #     return [int(b) for b in f"{num:0{n_bits}b}"[::-1]]
-
+# 
 # testing_case = torch.tensor([[construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(4, 8)], [construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(1, 8)]], dtype=torch.float32)
 # print(testing_case)
-
+# 
 # csa = carry_save_adder(8)
 # print(csa(testing_case))

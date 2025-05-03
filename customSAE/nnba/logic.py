@@ -6,7 +6,7 @@ class AND(nn.Module):
     def __init__(self, NOT=False):
         super().__init__()
         self.fc = nn.Linear(2, 1, bias=True)
-        ps = 16
+        ps = 1
 
         with torch.no_grad():
             if NOT:
@@ -28,7 +28,7 @@ class OR(nn.Module):
     def __init__(self, NOT=False):
         super().__init__()
         self.fc = nn.Linear(2, 1, bias=True)
-        ps = 16
+        ps = 1
 
         with torch.no_grad():
             if NOT:
