@@ -13,6 +13,8 @@ SAEs/*
 !feature_labels/.gitkeep
 !SAEs/.gitkeep
 
+outputs/*
+errors/*
 *.out
 *.log
 log.out

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from .logic import *
-# from logic import *
+# from .logic import *
+from logic import *
 
 class half_adder(nn.Module):
 
@@ -11,9 +11,21 @@ class half_adder(nn.Module):
         self.xor_gate = XOR()
         self.and_gate = AND()
 
-    def forward(self, input):
-        output = self.xor_gate(input)
-        c_out = self.and_gate(input)
+    def forward(self, a, b):
+        """Compute *a + b* (no carry-in).
+
+        Parameters
+        ----------
+        a, b : torch.Tensor
+            Tensors of shape ``(batch, 1)`` (or broadcast-compatible) holding
+            the least-significant bit of each operand.
+        Returns
+        -------
+        (sum, carry)
+            `sum` and `carry` are tensors of shape ``(batch, 1)``.
+        """
+        output = self.xor_gate(a, b)
+        c_out = self.and_gate(a, b)
 
         return output, c_out
 
@@ -25,11 +37,16 @@ class full_adder(nn.Module):
         self.ha = half_adder()
         self.or_gate = OR()
 
-    def forward(self, input, c_in):
-        out_t, c_t1 = self.ha(input)
-        output, c_t2 = self.ha(torch.concat((out_t, c_in), dim=-1))
+    def forward(self, a, b, c_in):
+        """Full adder: *a + b + c_in*.
 
-        c_out = self.or_gate(torch.concat((c_t1, c_t2), dim=-1))
+        All inputs are tensors of shape ``(batch, 1)``.
+        Returns ``(sum, carry)`` each of shape ``(batch, 1)``.
+        """
+        out_t, c_t1 = self.ha(a, b)
+        output, c_t2 = self.ha(out_t, c_in)
+
+        c_out = self.or_gate(c_t1, c_t2)
 
         return output, c_out
 
@@ -49,11 +66,12 @@ class ripple_carry_adder(nn.Module):
         carry = torch.zeros_like(x)
 
         for i in range(self.n_bits):
-            input = torch.concat((x[:, i].unsqueeze(1), y[:, i].unsqueeze(1)), dim=1)
+            a = x[:, i].unsqueeze(1)
+            b = y[:, i].unsqueeze(1)
             if i == 0:
-                out_t, c_out = self.ha(input)
+                out_t, c_out = self.ha(a, b)
             else:
-                out_t, c_out = self.fa(input, c_out)
+                out_t, c_out = self.fa(a, b, c_out)
             
             carry[:, i] = c_out.squeeze()
             
@@ -84,6 +102,7 @@ class carry_save_adder(nn.Module):
             return self.rca(x[:, 0], x[:, 1])
         else:
             carry = torch.zeros_like(x[:, 1].unsqueeze(-1))
+            carry.requires_grad_(True)
 
             in_0 = x[:, 0].unsqueeze(-1)
             t_carry = x[:, 1].unsqueeze(-1)
@@ -94,61 +113,13 @@ class carry_save_adder(nn.Module):
 
                 in_1 = x[:, i+2].unsqueeze(-1)
 
-                in_0, t_carry = self.fa(torch.concat((in_0, in_1), dim=-1).squeeze(0), t_carry)
-                carry += t_carry
-                t_carry = torch.cat((torch.zeros_like(t_carry[:, 0:1]), t_carry[:, :-1]), dim=-2)
+                in_0, t_carry = self.fa(in_0, in_1, t_carry)
+                carry = carry + t_carry
+                t_carry = torch.roll(t_carry, shifts=1, dims=-2)
+                t_carry[:, 0] = 0
 
             output, t_carry = self.rca(in_0.squeeze(-1), t_carry.squeeze(-1))
 
             carry = carry.squeeze(-1) + t_carry
 
             return output, carry
-
-# testing_cases = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
-
-# adder_1 = half_adder()
-# print(adder_1(testing_cases))
-
-# adder_2 = full_adder()
-# 
-# carry_0 = torch.tensor([[0.], [0.], [0.], [0.]])
-# carry_1 = torch.tensor([[1.], [1.], [1.], [1.]])
-# print(adder_2(testing_cases, carry_0))
-# print(adder_2(testing_cases, carry_1))
-
-# testing_cases_x = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
-# testing_cases_y = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
-# 
-# rca = ripple_carry_adder(2)
-# print(rca(testing_cases_x, testing_cases_y))
-
-# test_values = [
-#     # Edge cases
-#     (0, 0),       # 0000 + 0000
-#     (15, 15),     # 1111 + 1111
-#     (8, 7),       # 1000 + 0111
-#     (1, 15),      # 0001 + 1111
-#     
-#     # Random cases
-#     (3, 5),       # 0011 + 0101
-#     (10, 6),      # 1010 + 0110
-#     (13, 9),      # 1101 + 1001
-#     (7, 11)       # 0111 + 1011
-# ]
-# # 
-# # # Convert to binary tensors (batch_size=8, bits=4)
-# x_bin = torch.tensor([[int(b) for b in f"{x:04b}"[::-1]] for x, _ in test_values], dtype=torch.float32)
-# y_bin = torch.tensor([[int(b) for b in f"{y:04b}"[::-1]] for _, y in test_values], dtype=torch.float32)
-# 
-# rca = ripple_carry_adder(4)
-# res = rca(x_bin, y_bin)
-# print(res)
-
-# def construct_binary_list(num, n_bits):
-#     return [int(b) for b in f"{num:0{n_bits}b}"[::-1]]
-# 
-# testing_case = torch.tensor([[construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(4, 8)], [construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(3, 8), construct_binary_list(1, 8)]], dtype=torch.float32)
-# print(testing_case)
-# 
-# csa = carry_save_adder(8)
-# print(csa(testing_case))

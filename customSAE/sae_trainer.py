@@ -21,7 +21,7 @@ class Trainer():
         else:
             self.device = torch.device("cpu")
             print("GPU not available, using CPU")
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.device = "cpu"
 
         self.sae_type = sae_type
@@ -60,16 +60,32 @@ class Trainer():
             batch = batch.to(self.device)
 
             if self.sae_type == 'b_sae':
+                with torch.profiler.profile(
+                        activities=[torch.profiler.ProfilerActivity.CPU,
+                                    torch.profiler.ProfilerActivity.CUDA],
+                        profile_memory=True,
+                        record_shapes=True,
+                        with_stack=True,
+                ) as prof:
+                    with torch.inference_mode():
+                        _ = self.model(batch) 
+                
+                print(prof.key_averages().table(sort_by="self_cuda_memory_usage"))
+                prof.export_chrome_trace("trace.json")
+                torch.cuda.memory_summary()
+                exit(0)
+
                 latent, recon, carry = self.model(batch)
 
                 scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
-                scale_factor = scale_factor / scale_factor.sum().float()
+                # scale_factor = scale_factor / scale_factor.sum().float()
 
                 batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
                 carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
 
                 recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
+                recon_loss *= self.config["hidden_dim"]
                 # Mean square error is too small
                 # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
                 carry *= scale_factor

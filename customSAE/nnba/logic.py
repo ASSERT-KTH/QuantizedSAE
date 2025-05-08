@@ -3,21 +3,21 @@ import torch.nn as nn
 
 class AND(nn.Module):
 
-    def __init__(self, NOT=False):
+    def __init__(self, NOT: bool = False, ps: float = 1.0):
         super().__init__()
-        self.fc = nn.Linear(2, 1, bias=True)
-        ps = 1
 
-        with torch.no_grad():
-            if NOT:
-                self.fc.weight.data = torch.tensor([[-1.*ps, -1.*ps]])
-                self.fc.bias.data = torch.tensor([1.5*ps])
-            else:
-                self.fc.weight.data = torch.tensor([[1.*ps, 1.*ps]])
-                self.fc.bias.data = torch.tensor([-1.5*ps])
+        self.NOT = NOT
+        self.ps = ps  # "pseudo-slope" used in the original implementation
 
-    def forward(self, x):
-        x = torch.sigmoid(self.fc(x))
+    def forward(self, a: torch.Tensor, b: torch.Tensor):
+
+        if self.NOT:
+            x_lin = - a - b + 1.5
+        else:
+            x_lin = a + b - 1.5
+
+        x = torch.sigmoid(x_lin)
+
         with torch.no_grad():
             bool_x = (x >= 0.5).float()
 
@@ -25,21 +25,19 @@ class AND(nn.Module):
 
 class OR(nn.Module):
 
-    def __init__(self, NOT=False):
+    def __init__(self, NOT: bool = False, ps: float = 1.0):
         super().__init__()
-        self.fc = nn.Linear(2, 1, bias=True)
-        ps = 1
+        self.NOT = NOT
+        self.ps = ps
 
-        with torch.no_grad():
-            if NOT:
-                self.fc.weight.data = torch.tensor([[-1.*ps, -1.*ps]])
-                self.fc.bias.data = torch.tensor([0.5*ps])
-            else:
-                self.fc.weight.data = torch.tensor([[1.*ps, 1.*ps]])
-                self.fc.bias.data = torch.tensor([-0.5*ps])
+    def forward(self, a: torch.Tensor, b: torch.Tensor):
 
-    def forward(self, x):
-        x = torch.sigmoid(self.fc(x))
+        if self.NOT:
+            x_lin = - a - b + 0.5
+        else:
+            x_lin = a + b - 0.5
+
+        x = torch.sigmoid(x_lin)
         with torch.no_grad():
             bool_x = (x >= 0.5).float()
 
@@ -48,27 +46,16 @@ class OR(nn.Module):
 class XOR(nn.Module):
 
     def __init__(self):
+
         super().__init__()
 
         self.nand_gate = AND(NOT=True)
         self.and_gate = AND()
         self.or_gate = OR()
     
-    def forward(self, x):
-        out_nand = self.nand_gate(x)
-        out_or = self.or_gate(x)
+    def forward(self, a, b):
 
-        in_and = torch.cat((out_or, out_nand), dim=-1)
+        out_nand = self.nand_gate(a, b)
+        out_or = self.or_gate(a, b)
 
-        return self.and_gate(in_and)
-
-# testing_cases = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.]])
-# 
-# a = AND(NOT=True)
-# print(a(testing_cases))
-# 
-# o = OR(NOT=True)
-# print(o(testing_cases))
-
-# xor = XOR()
-# print(xor(testing_cases))
+        return self.and_gate(out_or, out_nand)

@@ -34,12 +34,18 @@ class binary_decoder(nn.Module):
         # Reshape features for batch processing:
         filtered_features = (x * hard_weights.unsqueeze(0))
         # print(filtered_features)
-        features_by_neurons = torch.split(filtered_features, self.n_bits, dim=-1)
-        # print(features_by_neurons)
-        features_by_neurons_stack = torch.stack(features_by_neurons, dim=-3)
-        features_by_neurons_stack_reshape = features_by_neurons_stack.view(-1, features_by_neurons_stack.shape[-2], features_by_neurons_stack.shape[-1])
 
-        sum, carry = self.csa(features_by_neurons_stack_reshape)
+        # Following is the original method, consuming too much memory because of the split and stack operation
+        # features_by_neurons = torch.split(filtered_features, self.n_bits, dim=-1)
+        # print(features_by_neurons)
+        # features_by_neurons_stack = torch.stack(features_by_neurons, dim=-3)
+
+        features_by_neurons = filtered_features.unfold(-1, self.n_bits, self.n_bits).permute(0, 2, 1, 3)
+        # Batch: 512, Feature: 512, Neuron: 512, N_bits: 4
+
+        features_by_neurons = features_by_neurons.reshape(-1, features_by_neurons.shape[-2], features_by_neurons.shape[-1])
+
+        sum, carry = self.csa(features_by_neurons)
 
         sum = sum.reshape(-1, self.n_bits*self.out_features)
 

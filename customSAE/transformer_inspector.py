@@ -178,16 +178,17 @@ if __name__ == "__main__":
     )
 
     # input_text = "Kobe Bryant is a "
-    input_text = "the capital of the state containing Dallas is "
+    # input_text = "the capital of the state containing Dallas is "
+    input_text = "The most common colour for banana is"
 
     # input_text = "I want to generate a section of Python code:\ndef hello():\n"
     print("Input text:", input_text)
 
-    # generated_sequence = inspector.generate_text(input_text, max_length=32)
-    # print("Generated sequence:", inspector.tokenizer.batch_decode(generated_sequence))
+    generated_sequence = inspector.generate_text(input_text, max_length=32)
+    print("Generated sequence:", inspector.tokenizer.batch_decode(generated_sequence))
 
-    inspector.forward_pass(text=input_text, k=3)
+    # inspector.forward_pass(text=input_text, k=3)
 
-    inspector.display_hidden_states(2)
-    predictions = inspector.predict_from_hidden_states()
-    inspector.display_predictions(predictions)
+    # inspector.display_hidden_states(2)
+    # predictions = inspector.predict_from_hidden_states()
+    # inspector.display_predictions(predictions)
