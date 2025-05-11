@@ -21,7 +21,7 @@ class Trainer():
         else:
             self.device = torch.device("cpu")
             print("GPU not available, using CPU")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.device = "cpu"
 
         self.sae_type = sae_type
@@ -32,6 +32,9 @@ class Trainer():
             self.model = BinaryLatentSAE(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
         elif sae_type == "b_sae":
             self.model = BinarySAE(self.config["input_dim"], self.config["hidden_dim"], self.config["n_bits"]).to(self.device)
+            self.scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
+            self.scale_factor = self.scale_factor / self.scale_factor.sum().float()
+            # self.model = torch.compile(self.model, mode="reduce-overhead")
 
         self.epoch = 0
         self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
@@ -46,11 +49,14 @@ class Trainer():
         self.no_log = no_log
         if not self.no_log:
             wandb.init(project=proj_name, config=config)
-            wandb.watch(self.model, log="all", log_freq=10)
+            wandb.watch(self.model, log="all", log_freq=256)
 
     def one_epoch(self, dataset, wandb, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
+
+        # optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"], weight_decay=1e-4)
+        # optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config["lr"], alpha=0.9)
 
         dataloader = DataLoader(dataset, batch_size=self.config["batch_size"], shuffle=True, num_workers=4)
 
@@ -60,56 +66,61 @@ class Trainer():
             batch = batch.to(self.device)
 
             if self.sae_type == 'b_sae':
-                with torch.profiler.profile(
-                        activities=[torch.profiler.ProfilerActivity.CPU,
-                                    torch.profiler.ProfilerActivity.CUDA],
-                        profile_memory=True,
-                        record_shapes=True,
-                        with_stack=True,
-                ) as prof:
-                    with torch.inference_mode():
-                        _ = self.model(batch) 
+                # with torch.profiler.profile(
+                #         activities=[torch.profiler.ProfilerActivity.CPU,
+                #                     torch.profiler.ProfilerActivity.CUDA],
+                #         profile_memory=True,
+                #         record_shapes=True,
+                #         with_stack=True,
+                # ) as prof:
+                #     with torch.inference_mode():
+                #         _ = self.model(batch) 
                 
-                print(prof.key_averages().table(sort_by="self_cuda_memory_usage"))
-                prof.export_chrome_trace("trace.json")
-                torch.cuda.memory_summary()
-                exit(0)
+                # print(prof.key_averages().table(sort_by="self_cuda_memory_usage"))
+                # prof.export_chrome_trace("trace.json")
+                # torch.cuda.memory_summary()
+                # exit(0)
 
-                latent, recon, carry = self.model(batch)
+                with torch.autocast(device_type=self.device, dtype=torch.float16):
+                    latent, recon, carry = self.model(batch)
 
-                scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
-                # scale_factor = scale_factor / scale_factor.sum().float()
+                    batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+                    recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+                    # carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
 
-                batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-
-                recon_loss = torch.mean((((batch - recon) * scale_factor) ** 2).sum(dim=-1))
-                recon_loss *= self.config["hidden_dim"]
-                # Mean square error is too small
-                # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
-                carry *= scale_factor
-                sparsity_loss = torch.mean(latent.sum(dim=-1))
+                    recon_loss = torch.mean((((batch - recon) ** 2) * self.scale_factor).sum(dim=-1))
+                    # Mean square error is too small
+                    # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
+                    # carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
+                    carry_loss = torch.mean(carry * self.scale_factor[-1] * 2 / self.config["hidden_dim"])
+                    sparsity_loss = torch.mean(latent.sum(dim=-1))
+                    # loss = recon_loss + carry_loss
 
             else:
-                recon_loss = F.mse_loss(recon, batch)
                 latent, recon = self.model(batch)
+                recon_loss = F.mse_loss(recon, batch)
                 sparsity_loss = torch.mean(torch.abs(latent).sum(dim=-1))
+                # loss = recon_loss + sparsity_loss
 
+
+            loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
 
             # if epoch < 2:
             #     loss = recon_loss
             # else:
             #     pass
-            loss = recon_loss + self.config["sparsity_lambda"] * sparsity_loss
+            # loss = recon_loss + self.config["sparsity_lambda"] * sparsity_loss
 
-            if self.sae_type == "b_sae":
-                carry_loss = torch.mean(carry)
+            # if self.sae_type == "b_sae":
+            #     carry_loss = torch.mean(carry)
                 # carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
                 # loss +=  carry_loss
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            # for name, param in self.model.named_parameters():
+            #     if param.requires_grad and param.grad is not None:
+            #         print(f"grad_norms/{name}: {param.grad.norm()}")
 
             if rigL == True:
                 self.model.decoder.mask_grad()
@@ -118,7 +129,7 @@ class Trainer():
 
             # For binary latent:
             # inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
-            inactivated_neurons = torch.mean(latent.sum(dim=-1))
+            inactivated_neurons = self.config["hidden_dim"] - torch.mean(latent.sum(dim=-1))
 
             # For ReLU:
             # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
@@ -127,20 +138,18 @@ class Trainer():
                 # Log metrics
                 if self.sae_type == "b_sae":
                     wandb.log({
-                        "loss": loss,
+                        "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
                         "carry_loss": carry_loss.item(),
-                        "inactivated_neurons": inactivated_neurons
-                        # "dead_neurons": dead_neurons
+                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
                 else:
                     wandb.log({
-                        "loss": loss,
+                        "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
-                        "inactivated_neurons": inactivated_neurons
-                        # "dead_neurons": dead_neurons
+                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
 
         return self.model
@@ -174,12 +183,12 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 512,
+    "hidden_dim": 1024,
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-3,
-    "sparsity_lambda": 1e-5,
+    "lr": 1e-6,
+    "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
     "batch_size": 512
 }

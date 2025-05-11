@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-# from .logic import *
-from logic import *
+from .logic import *
+# from logic import *
 
 class half_adder(nn.Module):
 
@@ -101,8 +101,8 @@ class carry_save_adder(nn.Module):
         elif len_x == 2:
             return self.rca(x[:, 0], x[:, 1])
         else:
-            carry = torch.zeros_like(x[:, 1].unsqueeze(-1))
-            carry.requires_grad_(True)
+            # carry = torch.zeros_like(x[:, 0].unsqueeze(-1))
+            carry = torch.zeros(x.shape[0], dtype=x.dtype, device=x.device, requires_grad=True)
 
             in_0 = x[:, 0].unsqueeze(-1)
             t_carry = x[:, 1].unsqueeze(-1)
@@ -114,12 +114,14 @@ class carry_save_adder(nn.Module):
                 in_1 = x[:, i+2].unsqueeze(-1)
 
                 in_0, t_carry = self.fa(in_0, in_1, t_carry)
-                carry = carry + t_carry
+                carry = carry + t_carry[:, -1].squeeze(-1)
+                # carry = carry + t_carry
                 t_carry = torch.roll(t_carry, shifts=1, dims=-2)
                 t_carry[:, 0] = 0
 
             output, t_carry = self.rca(in_0.squeeze(-1), t_carry.squeeze(-1))
 
-            carry = carry.squeeze(-1) + t_carry
+            # carry = carry.squeeze(-1) + t_carry
+            carry = carry + t_carry[:, -1]
 
             return output, carry

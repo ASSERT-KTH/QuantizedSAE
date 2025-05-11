@@ -20,30 +20,37 @@ class binary_decoder(nn.Module):
             # param.requires_grad = True
 
         # nn.init.kaiming_normal_(self.weight)
-        nn.init.normal_(self.weight, mean=0.5, std=1.0)
+        nn.init.normal_(self.weight, mean=0.5, std=0.2)
         # Clamp outliers to [0, 1]
         self.weight.data.clamp_(0, 1)
 
     def forward(self, x):
-        # Binary weights(feature representations):
-        # self.weight.data.clamp_(0, 1) # Problematic part
-        # clamped_weight = self.weight.clamp(0, 1)
-        hard_weights = self.weight + ((self.weight >= self.threshold).float() - self.weight).detach() # Binary SAE
-        x = x.unsqueeze(-1)
-        
-        # Reshape features for batch processing:
-        filtered_features = (x * hard_weights.unsqueeze(0))
-        # print(filtered_features)
+        # --- Training path: straight-through estimator on float tensors ----
+        hard_weights = self.weight + ((self.weight >= self.threshold).float() - self.weight).detach()
 
-        # Following is the original method, consuming too much memory because of the split and stack operation
-        # features_by_neurons = torch.split(filtered_features, self.n_bits, dim=-1)
-        # print(features_by_neurons)
-        # features_by_neurons_stack = torch.stack(features_by_neurons, dim=-3)
+        # Optionally run multiplications in half precision for speed (esp. on GPU)
+        if x.is_floating_point():
+            x = x.to(torch.float16)
+            hard_weights = hard_weights.to(torch.float16)
+
+        # --- Inference path: exploit true binarity to save compute --------
+        if not self.training:
+            # Cast to bool → logical AND is cheaper than multiplication
+            x_bool = (x >= 0.5) if x.is_floating_point() else x.bool()
+            w_bool = (hard_weights >= 0.5)
+            filtered_features = torch.logical_and(x_bool.unsqueeze(-1), w_bool.unsqueeze(0)).float()
+        else:
+            # filtered_features = (x * hard_weights.unsqueeze(0))
+            if x.dim() == 1:
+                x = x.unsqueeze(0)
+
+            filtered_features = torch.einsum("bf,fo->bfo", x, hard_weights)
 
         features_by_neurons = filtered_features.unfold(-1, self.n_bits, self.n_bits).permute(0, 2, 1, 3)
         # Batch: 512, Feature: 512, Neuron: 512, N_bits: 4
 
-        features_by_neurons = features_by_neurons.reshape(-1, features_by_neurons.shape[-2], features_by_neurons.shape[-1])
+        batch_size, num_neurons, feature_dim, n_bits = features_by_neurons.shape
+        features_by_neurons = features_by_neurons.contiguous().view(-1, feature_dim, n_bits)
 
         sum, carry = self.csa(features_by_neurons)
 
@@ -72,8 +79,9 @@ class BinarySAE(SparseAutoencoder):
 
         with torch.no_grad():
             binary_latent = (latent >= 0.5).float()
+            diff = binary_latent - latent
 
-        recon, carry = self.decode(latent + binary_latent - latent.detach())
+        recon, carry = self.decode(latent + diff)
         return binary_latent, recon, carry
 
 # bd = binary_decoder(3, 2, 2)

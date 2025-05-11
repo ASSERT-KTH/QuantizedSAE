@@ -7,21 +7,18 @@ class AND(nn.Module):
         super().__init__()
 
         self.NOT = NOT
-        self.ps = ps  # "pseudo-slope" used in the original implementation
+        self.ps = ps
 
     def forward(self, a: torch.Tensor, b: torch.Tensor):
 
+        condition = (a == 1) | (b == 1)  # | is bitwise OR operator
+
         if self.NOT:
-            x_lin = - a - b + 1.5
+            x_lin = torch.where(condition, 1 - a * b, 1 - a - b)
         else:
-            x_lin = a + b - 1.5
-
-        x = torch.sigmoid(x_lin)
-
-        with torch.no_grad():
-            bool_x = (x >= 0.5).float()
-
-        return x + (bool_x - x).detach()
+            x_lin = torch.where(condition, a * b, a + b)
+        
+        return x_lin
 
 class OR(nn.Module):
 
@@ -32,30 +29,20 @@ class OR(nn.Module):
 
     def forward(self, a: torch.Tensor, b: torch.Tensor):
 
+        condition = (a == 0) | (b == 0)  # | is bitwise OR operator
+
         if self.NOT:
-            x_lin = - a - b + 0.5
+            x_lin = torch.where(condition, 1 - a - b + a * b, 2 - a - b)
         else:
-            x_lin = a + b - 0.5
+            x_lin = torch.where(condition, a + b - a * b, a + b - 1)
 
-        x = torch.sigmoid(x_lin)
-        with torch.no_grad():
-            bool_x = (x >= 0.5).float()
-
-        return x + (bool_x - x).detach()
+        return x_lin
 
 class XOR(nn.Module):
 
     def __init__(self):
-
         super().__init__()
 
-        self.nand_gate = AND(NOT=True)
-        self.and_gate = AND()
-        self.or_gate = OR()
-    
-    def forward(self, a, b):
+    def forward(self, a: torch.Tensor, b: torch.Tensor):
 
-        out_nand = self.nand_gate(a, b)
-        out_or = self.or_gate(a, b)
-
-        return self.and_gate(out_or, out_nand)
+        return a + b - 2 * a * b
