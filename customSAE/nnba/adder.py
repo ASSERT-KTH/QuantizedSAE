@@ -101,8 +101,8 @@ class carry_save_adder(nn.Module):
         elif len_x == 2:
             return self.rca(x[:, 0], x[:, 1])
         else:
-            # carry = torch.zeros_like(x[:, 0].unsqueeze(-1))
-            carry = torch.zeros(x.shape[0], dtype=x.dtype, device=x.device, requires_grad=True)
+            # Initialize carry with zeros but don't track gradients for in-place operations
+            carry = torch.zeros(x.shape[0], dtype=x.dtype, device=x.device)
 
             in_0 = x[:, 0].unsqueeze(-1)
             t_carry = x[:, 1].unsqueeze(-1)
@@ -114,14 +114,15 @@ class carry_save_adder(nn.Module):
                 in_1 = x[:, i+2].unsqueeze(-1)
 
                 in_0, t_carry = self.fa(in_0, in_1, t_carry)
-                carry = carry + t_carry[:, -1].squeeze(-1)
+                # Use out-of-place addition to avoid in-place gradient issues
+                carry = carry + t_carry[:, -1].squeeze(-1).detach()
                 # carry = carry + t_carry
                 t_carry = torch.roll(t_carry, shifts=1, dims=-2)
                 t_carry[:, 0] = 0
 
             output, t_carry = self.rca(in_0.squeeze(-1), t_carry.squeeze(-1))
 
-            # carry = carry.squeeze(-1) + t_carry
-            carry = carry + t_carry[:, -1]
+            # Final accumulation of carry
+            carry = carry + t_carry[:, -1].detach()
 
             return output, carry

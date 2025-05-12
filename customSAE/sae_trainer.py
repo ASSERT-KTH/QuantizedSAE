@@ -7,9 +7,10 @@ import wandb
 import os
 import time
 import math
-from ternary_SAE import *
-from binary_latent_SAE import *
-from binary_SAE import *
+from SAEs.ternary_SAE import *
+from SAEs.binary_latent_SAE import *
+from SAEs.binary_SAE import *
+import numpy as np
 
 class Trainer():
 
@@ -61,9 +62,16 @@ class Trainer():
         dataloader = DataLoader(dataset, batch_size=self.config["batch_size"], shuffle=True, num_workers=4)
 
         latent, recon, carry = None, None, None
+        batch_idx = 0
 
         for batch in dataloader:
+            batch_idx += 1
             batch = batch.to(self.device)
+            
+            # Check if batch contains NaN before forward pass
+            if torch.isnan(batch).any():
+                print(f"Batch {batch_idx} contains NaN values before forward pass!")
+                continue
 
             if self.sae_type == 'b_sae':
                 # with torch.profiler.profile(
@@ -81,20 +89,37 @@ class Trainer():
                 # torch.cuda.memory_summary()
                 # exit(0)
 
-                with torch.autocast(device_type=self.device, dtype=torch.float16):
-                    latent, recon, carry = self.model(batch)
+                # Debug encoder output
+                with torch.no_grad():
+                    encoder_output = self.model.encode(batch)
+                    if torch.isnan(encoder_output).any():
+                        print(f"Batch {batch_idx}: Encoder output contains NaN!")
+                        # Check encoder weights for NaN
+                        for name, param in self.model.encoder.named_parameters():
+                            if torch.isnan(param).any():
+                                print(f"NaN detected in encoder parameter: {name}")
+                        continue
 
-                    batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                    recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                    # carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+                # Remove autocast to avoid fp16 precision issues, which can cause gradient overflow
+                # Even with binary values, the ripple-carry calculation can exceed fp16 range
+                latent, recon, carry = self.model(batch)
+                
+                # Check for NaN in outputs
+                if torch.isnan(latent).any() or torch.isnan(recon).any() or torch.isnan(carry).any():
+                    print(f"Batch {batch_idx}: NaN in model outputs!")
+                    continue
 
-                    recon_loss = torch.mean((((batch - recon) ** 2) * self.scale_factor).sum(dim=-1))
-                    # Mean square error is too small
-                    # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
-                    # carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
-                    carry_loss = torch.mean(carry * self.scale_factor[-1] * 2 / self.config["hidden_dim"])
-                    sparsity_loss = torch.mean(latent.sum(dim=-1))
-                    # loss = recon_loss + carry_loss
+                batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+                recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+                # carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
+
+                recon_loss = torch.mean((((batch - recon) ** 2) * self.scale_factor).sum(dim=-1))
+                # Mean square error is too small
+                # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
+                # carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
+                carry_loss = torch.mean(carry * self.scale_factor[-1] * 2 / self.config["hidden_dim"])
+                sparsity_loss = torch.mean(latent.sum(dim=-1))
+                # loss = recon_loss + carry_loss
 
             else:
                 latent, recon = self.model(batch)
@@ -104,6 +129,8 @@ class Trainer():
 
 
             loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
+            # loss = recon_loss + carry_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
+            # loss = recon_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
 
             # if epoch < 2:
             #     loss = recon_loss
@@ -116,16 +143,41 @@ class Trainer():
                 # carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
                 # loss +=  carry_loss
 
+            # Check if loss is NaN
+            if torch.isnan(loss).any():
+                print(f"Batch {batch_idx}: Loss is NaN! recon_loss={recon_loss.item()}, sparsity_loss={sparsity_loss.item()}")
+                continue
+
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            # for name, param in self.model.named_parameters():
-            #     if param.requires_grad and param.grad is not None:
-            #         print(f"grad_norms/{name}: {param.grad.norm()}")
+            
+            # Monitor gradients
+            max_grad_norm = 0
+            for name, param in self.model.named_parameters():
+                if param.requires_grad and param.grad is not None:
+                    grad_norm = param.grad.norm().item()
+                    if grad_norm > max_grad_norm:
+                        max_grad_norm = grad_norm
+                    
+                    # Check for NaN gradients
+                    if torch.isnan(param.grad).any():
+                        print(f"Batch {batch_idx}: NaN gradient detected in {name}")
+            
+            # Print or log the max gradient norm
+            print(f"Batch {batch_idx}: Max gradient norm: {max_grad_norm}")
+            
+            # Apply gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
             if rigL == True:
                 self.model.decoder.mask_grad()
 
             optimizer.step()
+            
+            # Check for NaN in model parameters after optimization step
+            for name, param in self.model.named_parameters():
+                if torch.isnan(param).any():
+                    print(f"Batch {batch_idx}: NaN detected in {name} after optimizer step")
 
             # For binary latent:
             # inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
@@ -142,6 +194,7 @@ class Trainer():
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
                         "carry_loss": carry_loss.item(),
+                        "max_grad_norm": max_grad_norm,
                         "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
                 else:
@@ -149,6 +202,7 @@ class Trainer():
                         "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
+                        "max_grad_norm": max_grad_norm,
                         "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
 
@@ -183,11 +237,11 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 1024,
+    "hidden_dim": 512,
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-6,
+    "lr": 1e-7,  # Increased learning rate to help with convergence
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
     "batch_size": 512
