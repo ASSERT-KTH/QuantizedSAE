@@ -126,3 +126,35 @@ class carry_save_adder(nn.Module):
             carry = carry + t_carry[:, -1].detach()
 
             return output, carry
+
+class surrogate_gradient_adder_dense(nn.Module):
+
+    def __init__(self, n_bits):
+
+        super().__init__()
+        self.n_bits = n_bits
+
+        self.rca = ripple_carry_adder(n_bits)
+
+    def forward(self, x):
+
+        len_x = x.shape[-2]
+
+        if len_x < 2:
+            raise ValueError("Input x must have length at least 2")
+        elif len_x == 2:
+            return self.rca(x[:, 0], x[:, 1])
+        else:
+            # Calculate the residual of the sum w.r.t. the input bits
+            with torch.no_grad():
+                powers = 2 ** torch.arange(self.n_bits, device=x.device)
+                x_sum = (x.sum(dim=-2) * powers).sum(dim=-1)
+                x_int = (x * powers).sum(dim=-1)
+                x_residual = (((x_sum.unsqueeze(-1) - x_int).int().unsqueeze(-1) & powers.int()) > 0).float()
+
+            output, carry = self.rca(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
+
+            output = output.reshape(x.shape).mean(dim=-2)
+            carry = carry.reshape(x.shape).sum(dim=-2)
+
+            return output, carry
