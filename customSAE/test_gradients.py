@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from binary_SAE import BinarySAE
+from SAEs.binary_SAE import BinarySAE, binary_decoder
 from nnba.adder import carry_save_adder
 from nnba.logic import AND, OR, XOR
 
@@ -69,7 +69,6 @@ def test_adder():
 
 def test_binary_decoder():
     print("\n=== Testing Binary Decoder ===")
-    from binary_SAE import binary_decoder
     decoder = binary_decoder(in_features=4, out_features=3, n_bits=4)
     x = torch.tensor([0.7, 0.3, 0.8, 0.2], requires_grad=True)
     sum_out, carry = decoder(x)

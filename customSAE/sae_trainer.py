@@ -121,16 +121,14 @@ class Trainer():
                 sparsity_loss = torch.mean(latent.sum(dim=-1))
                 # loss = recon_loss + carry_loss
 
+                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
+
             else:
                 latent, recon = self.model(batch)
                 recon_loss = F.mse_loss(recon, batch)
                 sparsity_loss = torch.mean(torch.abs(latent).sum(dim=-1))
                 # loss = recon_loss + sparsity_loss
 
-
-            loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
-            # loss = recon_loss + carry_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
-            # loss = recon_loss if self.sae_type == "b_sae" else recon_loss + sparsity_loss * self.config["sparsity_lambda"]
 
             # if epoch < 2:
             #     loss = recon_loss
@@ -237,14 +235,14 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 512,
+    "hidden_dim": 1024,
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-7,  # Increased learning rate to help with convergence
+    "lr": 1e-6,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
-    "batch_size": 512
+    "batch_size": 256
 }
 
 no_log = False

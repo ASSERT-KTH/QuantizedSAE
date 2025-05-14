@@ -134,7 +134,8 @@ class surrogate_gradient_adder_dense(nn.Module):
         super().__init__()
         self.n_bits = n_bits
 
-        self.rca = ripple_carry_adder(n_bits)
+        # self.rca = ripple_carry_adder(n_bits)
+        self.optimized_binary_adder = OptimizedBinaryAdder(n_bits)
 
     def forward(self, x):
 
@@ -143,7 +144,8 @@ class surrogate_gradient_adder_dense(nn.Module):
         if len_x < 2:
             raise ValueError("Input x must have length at least 2")
         elif len_x == 2:
-            return self.rca(x[:, 0], x[:, 1])
+            # return self.rca(x[:, 0], x[:, 1])
+            return self.optimized_binary_adder(x[:, 0], x[:, 1])
         else:
             # Calculate the residual of the sum w.r.t. the input bits
             with torch.no_grad():
@@ -152,9 +154,120 @@ class surrogate_gradient_adder_dense(nn.Module):
                 x_int = (x * powers).sum(dim=-1)
                 x_residual = (((x_sum.unsqueeze(-1) - x_int).int().unsqueeze(-1) & powers.int()) > 0).float()
 
-            output, carry = self.rca(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
+            # output, carry = self.rca(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
+            output, carry = self.optimized_binary_adder(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
 
-            output = output.reshape(x.shape).mean(dim=-2)
-            carry = carry.reshape(x.shape).sum(dim=-2)
+            output = output.reshape(x.shape).float().mean(dim=-2)
+            carry = carry.reshape(x.shape).float().sum(dim=-2)
 
             return output, carry
+
+class OptimizedBinaryAdderFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b):
+        batch_size, n_bits = a.shape
+        
+        a_binary = torch.round(a).to(torch.uint8)
+        b_binary = torch.round(b).to(torch.uint8)
+        
+        sum_bits = torch.zeros_like(a_binary)
+        carry = torch.zeros_like(a_binary)
+        
+        for i in range(n_bits):
+            if i == 0:
+                sum_bits[:, i] = a_binary[:, i] ^ b_binary[:, i]  # XOR
+                carry[:, i] = a_binary[:, i] & b_binary[:, i]     # AND
+            else:
+                sum_bits[:, i] = a_binary[:, i] ^ b_binary[:, i] ^ carry[:, i-1]
+                carry[:, i] = (a_binary[:, i] & b_binary[:, i]) | \
+                              (a_binary[:, i] & carry[:, i-1]) | \
+                              (b_binary[:, i] & carry[:, i-1])
+        
+        ctx.save_for_backward(a_binary, b_binary, carry)
+        ctx.n_bits = n_bits
+        
+        return sum_bits.float(), carry.float()
+    
+    @staticmethod
+    def backward(ctx, grad_sum, grad_carry):
+
+        a, b, carry = ctx.saved_tensors
+        n_bits = ctx.n_bits
+        batch_size = a.shape[0]
+        
+        grad_a = torch.zeros_like(a, dtype=torch.float16)
+        # grad_b = torch.zeros_like(b)
+        grad_b = None
+        
+        # Calculate gradients for each bit position
+        for i in range(n_bits):
+            if i == 0:
+
+                grad_a[:, i] += (1 - 2 * b[:, i]) * grad_sum[:, i]
+                # grad_b[:, i] += (1 - 2 * a[:, i]) * grad_sum[:, i]
+                
+                grad_a[:, i] += b[:, i] * grad_carry[:, i]
+                # grad_b[:, i] += a[:, i] * grad_carry[:, i]
+            else:
+                # Previous carry
+                c_prev = carry[:, i-1]
+                
+                # For full adder:
+                # ∂sum/∂a = (1 - 2b) * (1 - 2c_prev)   [from a⊕b⊕c_prev]
+                # ∂sum/∂b = (1 - 2a) * (1 - 2c_prev)   [from a⊕b⊕c_prev]
+                # ∂sum/∂c_prev = (1 - 2a) * (1 - 2b)   [from a⊕b⊕c_prev]
+                
+                # There are two options for the carry gradient:
+                # ∂carry/∂a = b + c_prev - 2*b*c_prev  [from a&b | a&c_prev | b&c_prev]
+                # ∂carry/∂b = a + c_prev - 2*a*c_prev  [from a&b | a&c_prev | b&c_prev]
+                # ∂carry/∂c_prev = a + b - 2*a*b       [from a&b | a&c_prev | b&c_prev]
+                # Or:
+                # ∂carry/∂a = b + c_prev - b*c_prev  [from a&b | a&c_prev | b&c_prev]
+                # ∂carry/∂b = a + c_prev - a*c_prev  [from a&b | a&c_prev | b&c_prev]
+                # ∂carry/∂c_prev = a + b - a*b       [from a&b | a&c_prev | b&c_prev]
+                # The second option is used here because 
+                # it gives gradient when the other two operands are 1s.
+                
+                # Sum gradients
+                grad_a[:, i] += (1 - 2 * b[:, i]) * (1 - 2 * c_prev) * grad_sum[:, i]
+                # grad_b[:, i] += (1 - 2 * a[:, i]) * (1 - 2 * c_prev) * grad_sum[:, i]
+                
+                # Carry gradients for current bit
+                grad_a[:, i] += (b[:, i] + c_prev - b[:, i] * c_prev) * grad_carry[:, i]
+                # grad_a[:, i] += (b[:, i] + c_prev - 2 * b[:, i] * c_prev) * grad_carry[:, i]
+                # grad_b[:, i] += (a[:, i] + c_prev - a[:, i] * c_prev) * grad_carry[:, i]
+                
+                # Propagate gradient to previous carry
+                grad_sum_to_prev_carry = (1 - 2 * a[:, i]) * (1 - 2 * b[:, i]) * grad_sum[:, i]
+                grad_carry_to_prev_carry = (a[:, i] + b[:, i] - a[:, i] * b[:, i]) * grad_carry[:, i]
+                # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - 2 * a[:, i] * b[:, i]) * grad_carry[:, i]
+                
+                # Add to the gradient of the previous bit's carry
+                if i > 0:  # Only if not the first bit
+                    grad_a[:, i-1] += grad_carry_to_prev_carry * b[:, i-1]
+                    # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
+        
+        return grad_a, grad_b
+
+class OptimizedBinaryAdder(nn.Module):
+
+    def __init__(self, n_bits):
+
+        super().__init__()
+        self.n_bits = n_bits
+    
+    def forward(self, a, b):
+
+        return OptimizedBinaryAdderFunction.apply(a, b)
+
+class FastRippleCarryAdder(nn.Module):
+
+    def __init__(self, n_bits):
+
+        super().__init__()
+        self.n_bits = n_bits
+        self.adder = OptimizedBinaryAdder(n_bits)
+    
+    def forward(self, x, y):
+
+        return self.adder(x, y)
