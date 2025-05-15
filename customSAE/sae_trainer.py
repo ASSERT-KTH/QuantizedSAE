@@ -16,14 +16,15 @@ class Trainer():
 
     def __init__(self, config, sae_type, rigL=False, no_log=False, proj_name=None):
         self.config = config
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda")
-            print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        if not no_log:
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+                print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+            else:
+                self.device = torch.device("cpu")
+                print("GPU not available, using CPU")
         else:
-            self.device = torch.device("cpu")
-            print("GPU not available, using CPU")
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = "cpu"
+            self.device = "cpu"
 
         self.sae_type = sae_type
 
@@ -148,24 +149,6 @@ class Trainer():
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            
-            # Monitor gradients
-            max_grad_norm = 0
-            for name, param in self.model.named_parameters():
-                if param.requires_grad and param.grad is not None:
-                    grad_norm = param.grad.norm().item()
-                    if grad_norm > max_grad_norm:
-                        max_grad_norm = grad_norm
-                    
-                    # Check for NaN gradients
-                    if torch.isnan(param.grad).any():
-                        print(f"Batch {batch_idx}: NaN gradient detected in {name}")
-            
-            # Print or log the max gradient norm
-            print(f"Batch {batch_idx}: Max gradient norm: {max_grad_norm}")
-            
-            # Apply gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
             if rigL == True:
                 self.model.decoder.mask_grad()
@@ -192,7 +175,6 @@ class Trainer():
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
                         "carry_loss": carry_loss.item(),
-                        "max_grad_norm": max_grad_norm,
                         "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
                 else:
@@ -200,7 +182,6 @@ class Trainer():
                         "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
-                        "max_grad_norm": max_grad_norm,
                         "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
 
@@ -239,12 +220,13 @@ config = {
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-6,
+    "lr": 1e-8,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
     "batch_size": 256
 }
 
+# no_log = True
 no_log = False
 trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
 

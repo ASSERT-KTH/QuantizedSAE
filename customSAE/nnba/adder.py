@@ -136,6 +136,7 @@ class surrogate_gradient_adder_dense(nn.Module):
 
         # self.rca = ripple_carry_adder(n_bits)
         self.optimized_binary_adder = OptimizedBinaryAdder(n_bits)
+        self.mask = None
 
     def forward(self, x):
 
@@ -145,7 +146,7 @@ class surrogate_gradient_adder_dense(nn.Module):
             raise ValueError("Input x must have length at least 2")
         elif len_x == 2:
             # return self.rca(x[:, 0], x[:, 1])
-            return self.optimized_binary_adder(x[:, 0], x[:, 1])
+            return self.optimized_binary_adder(x[:, 0], x[:, 1], self.mask)
         else:
             # Calculate the residual of the sum w.r.t. the input bits
             with torch.no_grad():
@@ -155,7 +156,7 @@ class surrogate_gradient_adder_dense(nn.Module):
                 x_residual = (((x_sum.unsqueeze(-1) - x_int).int().unsqueeze(-1) & powers.int()) > 0).float()
 
             # output, carry = self.rca(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
-            output, carry = self.optimized_binary_adder(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
+            output, carry = self.optimized_binary_adder(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]), self.mask)
 
             output = output.reshape(x.shape).float().mean(dim=-2)
             carry = carry.reshape(x.shape).float().sum(dim=-2)
@@ -164,8 +165,10 @@ class surrogate_gradient_adder_dense(nn.Module):
 
 class OptimizedBinaryAdderFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, a, b):
-        batch_size, n_bits = a.shape
+    def forward(ctx, a, b, mask):
+        # mask shpe: [batch, latent_dim, 1]
+        # a, b shape: [batch, latent_dim * n_neurons, n_bits]
+        _, n_bits = a.shape
         
         a_binary = torch.round(a).to(torch.uint8)
         b_binary = torch.round(b).to(torch.uint8)
@@ -183,7 +186,7 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                               (a_binary[:, i] & carry[:, i-1]) | \
                               (b_binary[:, i] & carry[:, i-1])
         
-        ctx.save_for_backward(a_binary, b_binary, carry)
+        ctx.save_for_backward(a_binary, b_binary, carry, mask)
         ctx.n_bits = n_bits
         
         return sum_bits.float(), carry.float()
@@ -191,9 +194,8 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_sum, grad_carry):
 
-        a, b, carry = ctx.saved_tensors
+        a, b, carry, mask = ctx.saved_tensors
         n_bits = ctx.n_bits
-        batch_size = a.shape[0]
         
         grad_a = torch.zeros_like(a, dtype=torch.float16)
         # grad_b = torch.zeros_like(b)
@@ -247,7 +249,20 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                     grad_a[:, i-1] += grad_carry_to_prev_carry * b[:, i-1]
                     # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
         
-        return grad_a, grad_b
+        batch_dim = mask.shape[0]
+        feature_dim = mask.shape[1]
+        neuron_dim = int(a.shape[0] / mask.shape[0] / mask.shape[1])
+        mask = mask.unsqueeze(2).expand(-1, -1, neuron_dim, -1)
+        mask = mask.reshape(batch_dim, feature_dim*neuron_dim, -1)
+        mask = mask.expand(-1, -1, n_bits).reshape(-1, n_bits)
+        reward_mask = (mask == 1) & (grad_a == 0)
+        reward_factor = 0.01 * 2**torch.arange(a.shape[-1], device=a.device)
+        reward_factor /= reward_factor.sum()
+        reward_grad = reward_mask * reward_factor
+        grad_a = grad_a + reward_grad * torch.sign(0.5 - a)
+        # grad_b = grad_b * mask
+
+        return grad_a, grad_b, None
 
 class OptimizedBinaryAdder(nn.Module):
 
@@ -256,18 +271,6 @@ class OptimizedBinaryAdder(nn.Module):
         super().__init__()
         self.n_bits = n_bits
     
-    def forward(self, a, b):
+    def forward(self, a, b, mask=None):
 
-        return OptimizedBinaryAdderFunction.apply(a, b)
-
-class FastRippleCarryAdder(nn.Module):
-
-    def __init__(self, n_bits):
-
-        super().__init__()
-        self.n_bits = n_bits
-        self.adder = OptimizedBinaryAdder(n_bits)
-    
-    def forward(self, x, y):
-
-        return self.adder(x, y)
+        return OptimizedBinaryAdderFunction.apply(a, b, mask)
