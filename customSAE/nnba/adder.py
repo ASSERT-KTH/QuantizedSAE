@@ -249,6 +249,9 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                     grad_a[:, i-1] += grad_carry_to_prev_carry * b[:, i-1]
                     # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
         
+        if mask is None:
+            mask = torch.ones(a.shape[0], 1, 1)
+
         batch_dim = mask.shape[0]
         feature_dim = mask.shape[1]
         neuron_dim = int(a.shape[0] / mask.shape[0] / mask.shape[1])
