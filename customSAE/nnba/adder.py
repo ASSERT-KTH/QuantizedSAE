@@ -195,6 +195,9 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
     def backward(ctx, grad_sum, grad_carry):
 
         a, b, carry, mask = ctx.saved_tensors
+        a = a.float()
+        b = b.float()
+        carry = carry.float()
         n_bits = ctx.n_bits
         
         grad_a = torch.zeros_like(a, dtype=torch.float16)
@@ -241,13 +244,18 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                 
                 # Propagate gradient to previous carry
                 grad_sum_to_prev_carry = (1 - 2 * a[:, i]) * (1 - 2 * b[:, i]) * grad_sum[:, i]
+
                 grad_carry_to_prev_carry = (a[:, i] + b[:, i] - a[:, i] * b[:, i]) * grad_carry[:, i]
                 # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - 2 * a[:, i] * b[:, i]) * grad_carry[:, i]
                 
                 # Add to the gradient of the previous bit's carry
-                if i > 0:  # Only if not the first bit
-                    grad_a[:, i-1] += grad_carry_to_prev_carry * b[:, i-1]
-                    # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
+                if i > 1:
+                    c_prev_prev = carry[:, i-2]
+                else:
+                    c_prev_prev = 0
+
+                grad_a[:, i-1] += grad_carry_to_prev_carry * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
+                # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
         
         if mask is None:
             mask = torch.ones(a.shape[0], 1, 1)
@@ -259,7 +267,7 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         mask = mask.reshape(batch_dim, feature_dim*neuron_dim, -1)
         mask = mask.expand(-1, -1, n_bits).reshape(-1, n_bits)
         reward_mask = (mask == 1) & (grad_a == 0)
-        reward_factor = 0.01 * 2**torch.arange(a.shape[-1], device=a.device)
+        reward_factor = 0.1 * 2**torch.arange(a.shape[-1], device=a.device)
         reward_factor /= reward_factor.sum()
         reward_grad = reward_mask * reward_factor
         grad_a = grad_a + reward_grad * torch.sign(0.5 - a)

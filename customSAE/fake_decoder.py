@@ -12,6 +12,17 @@ class FakeDecoder(nn.Module):
 
         nn.init.normal_(self.weight, mean=0.5, std=0.2)
         self.weight.data.clamp_(0, 1)
+        self.hook_handle = None
+        self.register_hook()
+
+    def register_hook(self):
+
+        def weight_hook(grad):
+            distance_from_threshold = abs(self.weight - (self.weight >= self.threshold).float())
+
+            return grad * distance_from_threshold
+
+        self.hook_handle = self.weight.register_hook(weight_hook)
 
     def forward(self, x):
         with torch.no_grad():
@@ -38,7 +49,10 @@ class FakeDecoderTrainer():
         self.training_goal = training_goal
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-5)
         self.sga = surrogate_gradient_adder_dense(n_dim)
-        self.batch_size = 2
+        self.batch_size = 1
+
+        self.scale_factor = (2 ** torch.arange(n_dim, device=self.model.weight.device)).float()
+        self.scale_factor /= self.scale_factor.sum()
 
     def synthetic_data(self):
         return torch.bernoulli(torch.ones(self.batch_size, self.n_dim) * 0.5).float()
@@ -47,7 +61,7 @@ class FakeDecoderTrainer():
 
         op_1 = self.training_goal.unsqueeze(0).repeat(self.batch_size, 1, 1)
 
-        for epoch in range(10000):
+        for epoch in range(100000):
 
             x = self.synthetic_data()
 
@@ -62,13 +76,15 @@ class FakeDecoderTrainer():
 
             self.optimizer.zero_grad()
 
-            loss = F.mse_loss(output, target)
+            print(f"Weight before update is {self.model.weight}")
+            loss = torch.mean(((output - target) ** 2 * self.scale_factor).sum(dim=-1))
+            # loss = F.mse_loss(output, target)
             loss.backward()
 
             self.optimizer.step()
             print(f"Target is {self.training_goal}, current weight is {self.model.weight}")
 
-n_dim = 4
+n_dim = 2
 training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
 print(training_goal)
 
