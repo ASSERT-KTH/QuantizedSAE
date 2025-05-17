@@ -18,7 +18,7 @@ class FakeDecoder(nn.Module):
     def register_hook(self):
 
         def weight_hook(grad):
-            distance_from_threshold = abs(self.weight - (self.weight >= self.threshold).float())
+            distance_from_threshold = torch.where(grad > 0, self.weight, 1 - self.weight)
 
             return grad * distance_from_threshold
 
@@ -47,7 +47,7 @@ class FakeDecoderTrainer():
         self.model = FakeDecoder(n_dim)
         self.n_dim = n_dim
         self.training_goal = training_goal
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-5)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
         self.sga = surrogate_gradient_adder_dense(n_dim)
         self.batch_size = 1
 
@@ -77,14 +77,14 @@ class FakeDecoderTrainer():
             self.optimizer.zero_grad()
 
             print(f"Weight before update is {self.model.weight}")
-            loss = torch.mean(((output - target) ** 2 * self.scale_factor).sum(dim=-1))
-            # loss = F.mse_loss(output, target)
+            # loss = torch.mean(((output - target) ** 2 * self.scale_factor).sum(dim=-1))
+            loss = F.mse_loss(output, target)
             loss.backward()
 
             self.optimizer.step()
             print(f"Target is {self.training_goal}, current weight is {self.model.weight}")
 
-n_dim = 2
+n_dim = 8
 training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
 print(training_goal)
 

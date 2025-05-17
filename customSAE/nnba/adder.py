@@ -254,7 +254,7 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                 else:
                     c_prev_prev = 0
 
-                grad_a[:, i-1] += grad_carry_to_prev_carry * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
+                grad_a[:, i-1] += (grad_carry_to_prev_carry + grad_sum_to_prev_carry) * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
                 # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
         
         if mask is None:

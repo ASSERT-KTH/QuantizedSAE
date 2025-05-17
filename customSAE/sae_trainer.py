@@ -122,7 +122,9 @@ class Trainer():
                 sparsity_loss = torch.mean(latent.sum(dim=-1))
                 # loss = recon_loss + carry_loss
 
-                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
+                # loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
+                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"]
+                # loss = recon_loss
 
             else:
                 latent, recon = self.model(batch)
@@ -220,7 +222,7 @@ config = {
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-8,
+    "lr": 1e-2,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
     "batch_size": 256
