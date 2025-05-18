@@ -22,3 +22,4 @@ log.out
 *.sh
 *.sbatch
 *.json
+*.png

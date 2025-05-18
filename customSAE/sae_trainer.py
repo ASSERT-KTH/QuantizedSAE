@@ -65,6 +65,7 @@ class Trainer():
         latent, recon, carry = None, None, None
         batch_idx = 0
 
+        latents = []
         for batch in dataloader:
             batch_idx += 1
             batch = batch.to(self.device)
@@ -149,6 +150,11 @@ class Trainer():
                 print(f"Batch {batch_idx}: Loss is NaN! recon_loss={recon_loss.item()}, sparsity_loss={sparsity_loss.item()}")
                 continue
 
+            active_per_sample = latent.sum(dim=1)              # [B]
+            inactive_per_sample = self.config["hidden_dim"] - active_per_sample      # [B]
+            print(inactive_per_sample.float().std())
+
+
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
 
@@ -177,7 +183,11 @@ class Trainer():
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
                         "carry_loss": carry_loss.item(),
-                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
+                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons,
+                        "inactive_mean" : inactive_per_sample.float().mean(),
+                        "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
+                        "inactive_min"  : inactive_per_sample.min(),
+                        "inactive_max"  : inactive_per_sample.max(),
                     })
                 else:
                     wandb.log({
@@ -218,11 +228,11 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 1024,
+    "hidden_dim": 512,
     "gamma": 4,
     "n_bits": 4,
     "epochs": 1,
-    "lr": 1e-2,
+    "lr": 1e-5,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
     "batch_size": 256

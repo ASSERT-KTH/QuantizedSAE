@@ -62,7 +62,7 @@ gradient_stats = {
 def analyze_encoder(model, test_batch, iteration, loss=None):
     # Get access to the linear layer and temperature sigmoid 
     linear_layer = model.encoder[0]
-    temp_sigmoid = model.encoder[1]
+    # temp_sigmoid = model.encoder[1]
     
     # Track linear weights statistics
     weight_stats = {
@@ -148,10 +148,17 @@ gradient_hook = setup_gradient_tracking(model)
 analyze_encoder(model, test_batch, 0)
 
 # Training loop
-n_iterations = 100
+n_iterations = 10000
+binary_latents = []
+last_binary_latents_sum = 0
 for i in range(1, n_iterations + 1):
     # Forward pass
     binary_latent, recon, carry = model(test_batch)
+    binary_latents.append(binary_latent)
+    binary_latents_sum = binary_latent.sum(dim=-1).mean()
+
+    if binary_latents_sum == last_binary_latents_sum:
+        print("Break break")
     
     # Calculate loss
     scale_factor = (2 ** torch.arange(config["n_bits"], device=device)).float()
@@ -255,8 +262,8 @@ print(f"Weight range: [{stats['weight_min'][-1]:.2f}, {stats['weight_max'][-1]:.
 
 # Temperature analysis
 print("\nTemperature analysis:")
-temp_value = model.encoder[1].temperature
-print(f"Current sigmoid temperature: {temp_value}")
-if temp_value > 10:
-    print("WARNING: Temperature is extremely high, causing immediate saturation!")
-    print(f"Recommended value: 0.5-2.0, current value: {temp_value}") 
+#temp_value = model.encoder[1].temperature
+# print(f"Current sigmoid temperature: {temp_value}")
+# if temp_value > 10:
+#     print("WARNING: Temperature is extremely high, causing immediate saturation!")
+#     print(f"Recommended value: 0.5-2.0, current value: {temp_value}") 

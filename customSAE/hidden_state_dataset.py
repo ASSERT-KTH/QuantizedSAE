@@ -70,6 +70,7 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
         
         sample = sample.float()
         return self.quantize(sample)
+        # return self.quantize_weighted(sample)
     
     def quantize(self, sample):
 
@@ -81,6 +82,20 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
         scaled_sample_expanded = scaled_sample.unsqueeze(-1)
     
         binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
+    
+        return binary_repr.view(-1) * 2 - 1
+
+    def quantize_weighted(self, sample):
+
+        scaled_sample = sample * self.scale_factor + self.shift_factor 
+        scaled_sample = torch.clamp(scaled_sample, 0, 2**self.n_bits - 1).round().int()
+
+        bit_positions = torch.arange(0, self.n_bits, device=scaled_sample.device)
+    
+        scaled_sample_expanded = scaled_sample.unsqueeze(-1)
+    
+        # binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
+        binary_repr = (scaled_sample_expanded & (1 << bit_positions)).float() / (1 << bit_positions).sum()
     
         return binary_repr.view(-1)
 
