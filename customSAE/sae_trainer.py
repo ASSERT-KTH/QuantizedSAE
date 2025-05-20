@@ -233,7 +233,7 @@ config = {
     "n_bits": 4,
     "epochs": 1,
     "lr": 1e-5,
-    "sparsity_lambda": 1e-6,
+    "sparsity_lambda": 1e-3,
     "carry_lambda": 1e-6,
     "batch_size": 256
 }

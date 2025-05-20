@@ -211,7 +211,8 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                 grad_a[:, i] += (1 - 2 * b[:, i]) * grad_sum[:, i]
                 # grad_b[:, i] += (1 - 2 * a[:, i]) * grad_sum[:, i]
                 
-                grad_a[:, i] += b[:, i] * grad_carry[:, i]
+                # grad_a[:, i] += b[:, i] * grad_carry[:, i]
+                grad_a[:, i] += grad_carry[:, i] # b[:, i] must be 1 when grad_carry[:, i] != 0
                 # grad_b[:, i] += a[:, i] * grad_carry[:, i]
             else:
                 # Previous carry
@@ -238,23 +239,22 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                 # grad_b[:, i] += (1 - 2 * a[:, i]) * (1 - 2 * c_prev) * grad_sum[:, i]
                 
                 # Carry gradients for current bit
-                grad_a[:, i] += (b[:, i] + c_prev - b[:, i] * c_prev) * grad_carry[:, i]
+                # grad_a[:, i] += (b[:, i] + c_prev - b[:, i] * c_prev) * grad_carry[:, i]
+                grad_a[:, i] += a[:, i] * grad_carry[:, i] # only when a[:, i] == 1 since carry from a & b | a & c_prev | b & c_prev
                 # grad_a[:, i] += (b[:, i] + c_prev - 2 * b[:, i] * c_prev) * grad_carry[:, i]
                 # grad_b[:, i] += (a[:, i] + c_prev - a[:, i] * c_prev) * grad_carry[:, i]
                 
                 # Propagate gradient to previous carry
                 grad_sum_to_prev_carry = (1 - 2 * a[:, i]) * (1 - 2 * b[:, i]) * grad_sum[:, i]
 
-                grad_carry_to_prev_carry = (a[:, i] + b[:, i] - a[:, i] * b[:, i]) * grad_carry[:, i]
+                # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - a[:, i] * b[:, i]) * grad_carry[:, i]
+                grad_carry_to_prev_carry = c_prev * grad_carry[:, i] # c_prev contributes to the current carry only when c_prev == 1.
                 # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - 2 * a[:, i] * b[:, i]) * grad_carry[:, i]
-                
-                # Add to the gradient of the previous bit's carry
-                if i > 1:
-                    c_prev_prev = carry[:, i-2]
-                else:
-                    c_prev_prev = 0
 
-                grad_a[:, i-1] += (grad_carry_to_prev_carry + grad_sum_to_prev_carry) * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
+                # grad_a[:, i-1] += (grad_carry_to_prev_carry + grad_sum_to_prev_carry) * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
+                # Because the nonlinearity nature of boolean operations, the chain rule is not applied here.
+                grad_a[:, i-1] += grad_carry_to_prev_carry * a[:, i-1] # Gradient from carry aims at decreasing carry[:, i], so to decrease carry[:, i-1], so only when a[:, i-1] == 1 should the gradient be effective.
+                grad_a[:, i-1] += grad_sum_to_prev_carry * (1 - a[:, i-1] - carry[:, i-1] + 2 * a[:, i-1] * carry[:, i-1]) # Gradient from sum should increase a when a[:, i-1] == 0 and carry[:, i] == 0.
                 # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
         
         if mask is None:
