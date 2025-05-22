@@ -61,7 +61,7 @@ class FakeDecoderTrainer():
 
         op_1 = self.training_goal.unsqueeze(0).repeat(self.batch_size, 1, 1)
 
-        for epoch in range(100000):
+        for epoch in range(1000):
 
             x = self.synthetic_data()
 

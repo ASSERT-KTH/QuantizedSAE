@@ -104,7 +104,8 @@ class Trainer():
 
                 # Remove autocast to avoid fp16 precision issues, which can cause gradient overflow
                 # Even with binary values, the ripple-carry calculation can exceed fp16 range
-                latent, recon, carry = self.model(batch)
+                symmetry_batch = batch - 0.5
+                latent, recon, carry = self.model(symmetry_batch)
                 
                 # Check for NaN in outputs
                 if torch.isnan(latent).any() or torch.isnan(recon).any() or torch.isnan(carry).any():
@@ -118,13 +119,13 @@ class Trainer():
                 recon_loss = torch.mean((((batch - recon) ** 2) * self.scale_factor).sum(dim=-1))
                 # Mean square error is too small
                 # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
-                # carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
-                carry_loss = torch.mean(carry * self.scale_factor[-1] * 2 / self.config["hidden_dim"])
+                carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
+                # carry_loss = torch.mean(carry * self.scale_factor[-1] * 2)
                 sparsity_loss = torch.mean(latent.sum(dim=-1))
                 # loss = recon_loss + carry_loss
 
-                # loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
-                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"]
+                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
+                # loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"]
                 # loss = recon_loss
 
             else:
@@ -183,11 +184,9 @@ class Trainer():
                         "recon_loss": recon_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
                         "carry_loss": carry_loss.item(),
-                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons,
-                        "inactive_mean" : inactive_per_sample.float().mean(),
-                        "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
-                        "inactive_min"  : inactive_per_sample.min(),
-                        "inactive_max"  : inactive_per_sample.max(),
+                        "inactivated_neurons": inactivated_neurons
+                        # "inactive_mean" : inactive_per_sample.float().mean(),
+                        # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
                     })
                 else:
                     wandb.log({
@@ -233,7 +232,7 @@ config = {
     "n_bits": 4,
     "epochs": 1,
     "lr": 1e-5,
-    "sparsity_lambda": 1e-3,
+    "sparsity_lambda": 1e-7,
     "carry_lambda": 1e-6,
     "batch_size": 256
 }

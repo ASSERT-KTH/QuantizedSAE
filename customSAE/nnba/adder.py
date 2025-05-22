@@ -200,7 +200,7 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         carry = carry.float()
         n_bits = ctx.n_bits
         
-        grad_a = torch.zeros_like(a, dtype=torch.float16)
+        grad_a = torch.zeros_like(a, dtype=torch.float32)
         # grad_b = torch.zeros_like(b)
         grad_b = None
         
