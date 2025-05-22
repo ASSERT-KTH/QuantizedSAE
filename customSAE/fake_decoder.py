@@ -10,7 +10,8 @@ class FakeDecoder(nn.Module):
         self.sga = surrogate_gradient_adder_dense(input_dim)
         self.threshold = 0.5
 
-        nn.init.normal_(self.weight, mean=0.5, std=0.2)
+        # nn.init.normal_(self.weight, mean=0.5, std=0.2)
+        nn.init.normal_(self.weight, mean=0.25, std=0.1)
         self.weight.data.clamp_(0, 1)
         self.hook_handle = None
         self.register_hook()
@@ -61,7 +62,7 @@ class FakeDecoderTrainer():
 
         op_1 = self.training_goal.unsqueeze(0).repeat(self.batch_size, 1, 1)
 
-        for epoch in range(1000):
+        for epoch in range(10000):
 
             x = self.synthetic_data()
 

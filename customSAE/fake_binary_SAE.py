@@ -9,8 +9,8 @@ from SAEs.binary_SAE import *
 
 # Set up device
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cuda"
-# device = "cpu"
+# device = "cuda"
+device = "cpu"
 print(f"Using device: {device}")
 
 def generate_binary_latents(batch_size=512):
@@ -25,13 +25,22 @@ def train_step(optimizer, latent_z, target_x):
     scale_factor = scale_factor / scale_factor.sum()
     target_x = target_x.view(512, 512, 4) * scale_factor
     pred_x = pred_x.view(512, 512, 4) * scale_factor
+    carry = carry.view(512, 512, 4)
     
-    loss = F.mse_loss(pred_x, target_x)
+    msb_carry = carry[:, :, -1]
+    carry_loss = torch.mean(msb_carry ** 2 * scale_factor[-1] * 2)
+
+    # carry = carry.view(512, 512, 4) * scale_factor * 2 / 512
+    # carry_loss = torch.mean(carry.sum(dim=-1))
+
+    recon_loss = F.mse_loss(pred_x, target_x)
+    
+    loss = recon_loss + carry_loss
     
     loss.backward()
     optimizer.step()
     
-    return loss.item()
+    return loss.item(), recon_loss.item(), carry_loss.item()
 
 # Initialize models
 fake_decoder = binary_decoder(in_features=512, out_features=512, n_bits=4).to(device)
@@ -67,15 +76,15 @@ try:
         with torch.no_grad():
             target_x, _ = fake_correct_decoder(latent_z)
         
-        loss = train_step(optimizer, latent_z, target_x)
+        loss, recon_loss, carry_loss = train_step(optimizer, latent_z, target_x)
         
         # Log progress
         if (epoch + 1) % log_interval == 0:
             elapsed_time = time.time() - start_time
-            print(f"Epoch: {epoch+1}/{n_epochs}, Loss: {loss:.6f}, Time: {elapsed_time:.2f}s")
+            print(f"Epoch: {epoch+1}/{n_epochs}, Loss: {loss:.6f}, Recon Loss: {recon_loss:.6f}, Carry Loss: {carry_loss:.6f}, Time: {elapsed_time:.2f}s")
             
             with open(log_file, 'a') as f:
-                f.write(f"{epoch+1},{loss:.6f},{elapsed_time:.2f}\n")
+                f.write(f"{epoch+1},{loss:.6f},{recon_loss:.6f},{carry_loss:.6f},{elapsed_time:.2f}\n")
             
             # Save best model
             if loss < best_loss:
