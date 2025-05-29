@@ -9,8 +9,8 @@ from SAEs.binary_SAE import *
 
 # Set up device
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# device = "cuda"
-device = "cpu"
+device = "cuda"
+# device = "cpu"
 print(f"Using device: {device}")
 
 def generate_binary_latents(batch_size=512):
