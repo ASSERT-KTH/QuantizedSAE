@@ -79,13 +79,13 @@ class FakeDecoderTrainer():
 
             print(f"Weight before update is {self.model.weight}")
             # loss = torch.mean(((output - target) ** 2 * self.scale_factor).sum(dim=-1))
-            loss = F.mse_loss(output, target)
+            loss = F.mse_loss(output, target) + torch.mean(carry * self.scale_factor)
             loss.backward()
 
             self.optimizer.step()
             print(f"Target is {self.training_goal}, current weight is {self.model.weight}")
 
-n_dim = 8
+n_dim = 4
 training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
 print(training_goal)
 

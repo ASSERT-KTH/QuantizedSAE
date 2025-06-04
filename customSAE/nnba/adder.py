@@ -136,7 +136,6 @@ class surrogate_gradient_adder_dense(nn.Module):
 
         # self.rca = ripple_carry_adder(n_bits)
         self.optimized_binary_adder = OptimizedBinaryAdder(n_bits)
-        self.mask = None
 
     def forward(self, x):
 
@@ -146,7 +145,7 @@ class surrogate_gradient_adder_dense(nn.Module):
             raise ValueError("Input x must have length at least 2")
         elif len_x == 2:
             # return self.rca(x[:, 0], x[:, 1])
-            return self.optimized_binary_adder(x[:, 0], x[:, 1], self.mask)
+            return self.optimized_binary_adder(x[:, 0], x[:, 1])
         else:
             # Calculate the residual of the sum w.r.t. the input bits
             with torch.no_grad():
@@ -156,7 +155,7 @@ class surrogate_gradient_adder_dense(nn.Module):
                 x_residual = (((x_sum.unsqueeze(-1) - x_int).int().unsqueeze(-1) & powers.int()) > 0).float()
 
             # output, carry = self.rca(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
-            output, carry = self.optimized_binary_adder(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]), self.mask)
+            output, carry = self.optimized_binary_adder(x.view(-1, x.shape[-1]), x_residual.view(-1, x_residual.shape[-1]))
 
             output = output.reshape(x.shape).float().mean(dim=-2)
             carry = carry.reshape(x.shape).float().sum(dim=-2)
@@ -165,28 +164,43 @@ class surrogate_gradient_adder_dense(nn.Module):
 
 class OptimizedBinaryAdderFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, a, b, mask):
+    def forward(ctx, a, b):
         # mask shpe: [batch, latent_dim, 1]
         # a, b shape: [batch, latent_dim * n_neurons, n_bits]
-        _, n_bits = a.shape
+        N, n_bits = a.shape
         
-        a_binary = torch.round(a).to(torch.uint8)
-        b_binary = torch.round(b).to(torch.uint8)
+        a_binary = torch.round(a).to(torch.int8)
+        b_binary = torch.round(b).to(torch.int8)
         
         sum_bits = torch.zeros_like(a_binary)
         carry = torch.zeros_like(a_binary)
+
+        Ds = torch.zeros(N, n_bits, n_bits, device=a.device, dtype=torch.float32)
+        Dc = torch.zeros_like(Ds)
         
         for i in range(n_bits):
             if i == 0:
                 sum_bits[:, i] = a_binary[:, i] ^ b_binary[:, i]  # XOR
                 carry[:, i] = a_binary[:, i] & b_binary[:, i]     # AND
+
+                Ds[:, i, i] = 1 - 2 * b_binary[:, i]
+                Dc[:, i, i] = a_binary[:, i]
             else:
                 sum_bits[:, i] = a_binary[:, i] ^ b_binary[:, i] ^ carry[:, i-1]
                 carry[:, i] = (a_binary[:, i] & b_binary[:, i]) | \
                               (a_binary[:, i] & carry[:, i-1]) | \
                               (b_binary[:, i] & carry[:, i-1])
+                
+                Ds[:, i, i] = (1 - 2 * b_binary[:, i]) * (1 - 2 * carry[:, i-1])
+                Dc[:, i, i] = a_binary[:, i]
+
+                ds_dcprev = (1 - 2 * a_binary[:, i]) * (1 - 2 * b_binary[:, i])
+                dc_dcprev = carry[:, i-1]
+
+                Ds[:, i, :i] = ds_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
+                Dc[:, i, :i] = dc_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
         
-        ctx.save_for_backward(a_binary, b_binary, carry, mask)
+        ctx.save_for_backward(a_binary, Ds, Dc)
         ctx.n_bits = n_bits
         
         return sum_bits.float(), carry.float()
@@ -194,86 +208,22 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_sum, grad_carry):
 
-        a, b, carry, mask = ctx.saved_tensors
+        a, Ds, Dc = ctx.saved_tensors
         a = a.float()
-        b = b.float()
-        carry = carry.float()
+        Ds = Ds.float()
+        Dc = Dc.float()
         n_bits = ctx.n_bits
         
         grad_a = torch.zeros_like(a, dtype=torch.float32)
         # grad_b = torch.zeros_like(b)
         grad_b = None
-        
-        # Calculate gradients for each bit position
-        for i in range(n_bits):
-            if i == 0:
 
-                grad_a[:, i] += (1 - 2 * b[:, i]) * grad_sum[:, i]
-                # grad_b[:, i] += (1 - 2 * a[:, i]) * grad_sum[:, i]
-                
-                # grad_a[:, i] += b[:, i] * grad_carry[:, i]
-                grad_a[:, i] += grad_carry[:, i] # b[:, i] must be 1 when grad_carry[:, i] != 0
-                # grad_b[:, i] += a[:, i] * grad_carry[:, i]
-            else:
-                # Previous carry
-                c_prev = carry[:, i-1]
-                
-                # For full adder:
-                # ∂sum/∂a = (1 - 2b) * (1 - 2c_prev)   [from a⊕b⊕c_prev]
-                # ∂sum/∂b = (1 - 2a) * (1 - 2c_prev)   [from a⊕b⊕c_prev]
-                # ∂sum/∂c_prev = (1 - 2a) * (1 - 2b)   [from a⊕b⊕c_prev]
-                
-                # There are two options for the carry gradient:
-                # ∂carry/∂a = b + c_prev - 2*b*c_prev  [from a&b | a&c_prev | b&c_prev]
-                # ∂carry/∂b = a + c_prev - 2*a*c_prev  [from a&b | a&c_prev | b&c_prev]
-                # ∂carry/∂c_prev = a + b - 2*a*b       [from a&b | a&c_prev | b&c_prev]
-                # Or:
-                # ∂carry/∂a = b + c_prev - b*c_prev  [from a&b | a&c_prev | b&c_prev]
-                # ∂carry/∂b = a + c_prev - a*c_prev  [from a&b | a&c_prev | b&c_prev]
-                # ∂carry/∂c_prev = a + b - a*b       [from a&b | a&c_prev | b&c_prev]
-                # The second option is used here because 
-                # it gives gradient when the other two operands are 1s.
-                
-                # Sum gradients
-                grad_a[:, i] += (1 - 2 * b[:, i]) * (1 - 2 * c_prev) * grad_sum[:, i]
-                # grad_b[:, i] += (1 - 2 * a[:, i]) * (1 - 2 * c_prev) * grad_sum[:, i]
-                
-                # Carry gradients for current bit
-                # grad_a[:, i] += (b[:, i] + c_prev - b[:, i] * c_prev) * grad_carry[:, i]
-                grad_a[:, i] += a[:, i] * grad_carry[:, i] # only when a[:, i] == 1 since carry from a & b | a & c_prev | b & c_prev
-                # grad_a[:, i] += (b[:, i] + c_prev - 2 * b[:, i] * c_prev) * grad_carry[:, i]
-                # grad_b[:, i] += (a[:, i] + c_prev - a[:, i] * c_prev) * grad_carry[:, i]
-                
-                # Propagate gradient to previous carry
-                grad_sum_to_prev_carry = (1 - 2 * a[:, i]) * (1 - 2 * b[:, i]) * grad_sum[:, i]
+        grad_a = (
+            torch.bmm(grad_sum.unsqueeze(1), Ds) +          # (N,1,n_bits)
+            torch.bmm(grad_carry.unsqueeze(1), Dc)          # (N,1,n_bits)
+        ).squeeze(1)
 
-                # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - a[:, i] * b[:, i]) * grad_carry[:, i]
-                grad_carry_to_prev_carry = c_prev * grad_carry[:, i] # c_prev contributes to the current carry only when c_prev == 1.
-                # grad_carry_to_prev_carry = (a[:, i] + b[:, i] - 2 * a[:, i] * b[:, i]) * grad_carry[:, i]
-
-                # grad_a[:, i-1] += (grad_carry_to_prev_carry + grad_sum_to_prev_carry) * (b[:, i-1] + c_prev_prev - b[:, i-1] * c_prev_prev)
-                # Because the nonlinearity nature of boolean operations, the chain rule is not applied here.
-                grad_a[:, i-1] += grad_carry_to_prev_carry * a[:, i-1] # Gradient from carry aims at decreasing carry[:, i], so to decrease carry[:, i-1], so only when a[:, i-1] == 1 should the gradient be effective.
-                grad_a[:, i-1] += grad_sum_to_prev_carry * (1 - a[:, i-1] - carry[:, i-1] + 2 * a[:, i-1] * carry[:, i-1]) # Gradient from sum should increase a when a[:, i-1] == 0 and carry[:, i] == 0.
-                # grad_b[:, i-1] += grad_carry_to_prev_carry * a[:, i-1]
-        
-        if mask is None:
-            mask = torch.ones(a.shape[0], 1, 1)
-
-        batch_dim = mask.shape[0]
-        feature_dim = mask.shape[1]
-        neuron_dim = int(a.shape[0] / mask.shape[0] / mask.shape[1])
-        mask = mask.unsqueeze(2).expand(-1, -1, neuron_dim, -1)
-        mask = mask.reshape(batch_dim, feature_dim*neuron_dim, -1)
-        mask = mask.expand(-1, -1, n_bits).reshape(-1, n_bits)
-        reward_mask = (mask == 1) & (grad_a == 0)
-        reward_factor = 0.1 * 2**torch.arange(a.shape[-1], device=a.device)
-        reward_factor /= reward_factor.sum()
-        reward_grad = reward_mask * reward_factor
-        grad_a = grad_a + reward_grad * torch.sign(0.5 - a)
-        # grad_b = grad_b * mask
-
-        return grad_a, grad_b, None
+        return grad_a, grad_b
 
 class OptimizedBinaryAdder(nn.Module):
 
@@ -282,6 +232,6 @@ class OptimizedBinaryAdder(nn.Module):
         super().__init__()
         self.n_bits = n_bits
     
-    def forward(self, a, b, mask=None):
+    def forward(self, a, b):
 
-        return OptimizedBinaryAdderFunction.apply(a, b, mask)
+        return OptimizedBinaryAdderFunction.apply(a, b)
