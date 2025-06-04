@@ -173,18 +173,18 @@ class adder(nn.Module):
     def forward(self, x, target):
 
         # Calculate the residual of the sum w.r.t. the input bits
-        x_sum = UnbiasedGradientEstimator.apply(x, target, self.n_bits)
+        x_sum = UnbiasedGradientEstimator.apply(x[:, 0], x[:, 1], target, self.n_bits)
 
         return x_sum
 
 class UnbiasedGradientEstimator(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, target, n_bits):
+    def forward(ctx, a, b, target, n_bits):
 
-        powers = 2 ** torch.arange(n_bits, device=x.device)
-        x_sum = (x.sum(dim=-2) * powers).sum(dim=-1)
+        powers = 2 ** torch.arange(n_bits, device=a.device)
+        x_sum = ((a + b) * powers).sum(dim=-1)
 
-        ctx.save_for_backward(x, x_sum, target)
+        ctx.save_for_backward(a, b, x_sum, target)
         ctx.n_bits = n_bits
 
         # output = x_sum % 2 ** n_bits
@@ -194,19 +194,20 @@ class UnbiasedGradientEstimator(torch.autograd.Function):
     
     @staticmethod
     def backward(ctx, grad_x_sum):
-        x, x_sum, target = ctx.saved_tensors
+        a, b, x_sum, target = ctx.saved_tensors
         n_bits = ctx.n_bits
 
-        x_direction = 1 - 2 * x
+        x_direction = 1 - 2 * a
         x_sum_alt = x_sum + x_direction * 2 ** torch.arange(n_bits)
 
         loss_sum = (x_sum - target) ** 2
         loss_sum_alt = (x_sum_alt - target) ** 2
-        grad_x = (loss_sum_alt - loss_sum.unsqueeze(-1)) * x_direction
+        grad_a = (loss_sum_alt - loss_sum.unsqueeze(-1)) * x_direction
+        grad_b = None
         grad_target = None
         grad_n_bits = None
 
-        return grad_x, grad_target, grad_n_bits
+        return grad_a, grad_b, grad_target, grad_n_bits
 
 class OptimizedBinaryAdderFunction(torch.autograd.Function):
     @staticmethod
