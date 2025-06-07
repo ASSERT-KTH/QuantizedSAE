@@ -13,17 +13,17 @@ class FakeDecoder(nn.Module):
         # nn.init.normal_(self.weight, mean=0.5, std=0.2)
         nn.init.normal_(self.weight, mean=0.25, std=0.1)
         self.weight.data.clamp_(0, 1)
-        self.hook_handle = None
-        self.register_hook()
+        # self.hook_handle = None
+        # self.register_hook()
 
-    def register_hook(self):
+    # def register_hook(self):
 
-        def weight_hook(grad):
-            distance_from_threshold = torch.where(grad > 0, self.weight, 1 - self.weight)
+    #     def weight_hook(grad):
+    #         distance_from_threshold = torch.where(grad > 0, self.weight, 1 - self.weight)
 
-            return grad * distance_from_threshold
+    #         return grad * distance_from_threshold
 
-        self.hook_handle = self.weight.register_hook(weight_hook)
+    #     self.hook_handle = self.weight.register_hook(weight_hook)
 
     def forward(self, x):
         with torch.no_grad():
@@ -39,9 +39,10 @@ class FakeDecoder(nn.Module):
         op_1 = hard_weight_with_gradient.unsqueeze(0).repeat(x.shape[0], 1, 1)
         op_2 = x.unsqueeze(1)
 
+        p = self.weight.unsqueeze(0).repeat(x.shape[0], 1, 1)
         op = torch.cat((op_1, op_2), dim=1)
 
-        return self.sga(op)
+        return self.sga(op, p)
     
 class FakeDecoderTrainer():
     def __init__(self, n_dim, training_goal):
@@ -62,7 +63,7 @@ class FakeDecoderTrainer():
 
         op_1 = self.training_goal.unsqueeze(0).repeat(self.batch_size, 1, 1)
 
-        for epoch in range(10000):
+        for epoch in range(100000):
 
             x = self.synthetic_data()
 
@@ -73,13 +74,28 @@ class FakeDecoderTrainer():
 
                 target, carry = self.sga(op)
 
+                if carry[:, -1] > 0:
+                    continue
+
             output, carry = self.model(x)
 
             self.optimizer.zero_grad()
 
             print(f"Weight before update is {self.model.weight}")
-            # loss = torch.mean(((output - target) ** 2 * self.scale_factor).sum(dim=-1))
-            loss = F.mse_loss(output, target) + torch.mean(carry * self.scale_factor)
+            
+            # Custom loss to get gradient of 1 for wrong bits, 0 for correct bits
+            # Round outputs to binary for comparison
+            output_binary = torch.round(output)
+            target_binary = torch.round(target)
+            
+            # Create a mask for incorrect bits
+            incorrect_bits = (output_binary != target_binary).float()
+            
+            # Custom loss that produces gradient of 1 for wrong bits, 0 for correct
+            # We multiply the difference by the incorrect_bits mask
+            bit_loss = (incorrect_bits * (output - target_binary)).sum()
+            
+            loss = bit_loss
             loss.backward()
 
             self.optimizer.step()
@@ -87,6 +103,7 @@ class FakeDecoderTrainer():
 
 n_dim = 4
 training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
+# training_goal = torch.tensor([1., 0., 1., 0.])
 print(training_goal)
 
 trainer = FakeDecoderTrainer(n_dim, training_goal)
