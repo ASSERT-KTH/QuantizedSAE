@@ -169,8 +169,8 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         # a, b shape: [batch, latent_dim * n_neurons, n_bits]
         N, n_bits = a.shape
         
-        a_binary = torch.round(a).to(torch.int8)
-        b_binary = torch.round(b).to(torch.int8)
+        a_binary = a.round().to(torch.int8)
+        b_binary = b.round().to(torch.int8)
         
         sum = torch.zeros_like(a_binary)
         carry = torch.zeros_like(a_binary)
@@ -184,8 +184,8 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                 carry[:, i] = a_binary[:, i] & b_binary[:, i]     # AND
 
                 Ds[:, i, i] = 1 - 2 * b_binary[:, i]
-                Dc[:, i, i] = a_binary[:, i]
-                # Dc[:, i, i] = b_binary[:, i]
+                # Dc[:, i, i] = a_binary[:, i]
+                Dc[:, i, i] = b_binary[:, i]
             else:
                 sum[:, i] = a_binary[:, i] ^ b_binary[:, i] ^ carry[:, i-1]
                 carry[:, i] = (a_binary[:, i] & b_binary[:, i]) | \
@@ -193,8 +193,8 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
                               (b_binary[:, i] & carry[:, i-1])
                 
                 Ds[:, i, i] = (1 - 2 * b_binary[:, i]) * (1 - 2 * carry[:, i-1])
-                Dc[:, i, i] = a_binary[:, i]
-                # Dc[:, i, i] = b_binary[:, i] + carry[:, i-1] - b_binary[:, i] * carry[:, i-1]
+                # Dc[:, i, i] = a_binary[:, i]
+                Dc[:, i, i] = b_binary[:, i] + carry[:, i-1] - 2 * b_binary[:, i] * carry[:, i-1]
 
                 ds_dcprev = (1 - 2 * a_binary[:, i]) * (1 - 2 * b_binary[:, i])
                 # dc_dcprev = carry[:, i-1]
@@ -215,34 +215,35 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
             mask_idx[:, i] = torch.where(prop[:, i], running_mask, torch.full_like(running_mask, i))
             running_mask = torch.where(propagate[:, i], running_mask, torch.full_like(running_mask, i))
 
-        ctx.save_for_backward(a_binary, sum, Ds, Dc, mask_idx, carry, p)
+        ctx.save_for_backward(a_binary, sum, carry, Ds, Dc, mask_idx, p)
         ctx.n_bits = n_bits
         
         return sum.float(), carry.float()
     
     @staticmethod
-    def backward(ctx, err_sum, carry_ph):
+    def backward(ctx, err_sum, err_carry):
 
-        a, sum, Ds, Dc, mask_idx, carry, p = ctx.saved_tensors
+        a, sum, carry, Ds, Dc, mask_idx, p = ctx.saved_tensors
         a = a.float()
         Ds = Ds.float()
         Dc = Dc.float()
         mask_idx = mask_idx.float()
         n_bits = ctx.n_bits
 
-        scale = 2 ** torch.arange(n_bits, dtype=torch.float32)
+        scale = 2 ** torch.arange(n_bits, device=a.device, dtype=torch.float32)
         scale /= scale.sum()
         carry_scale = scale * 2
         carry_scale[:-1] = 0
         
         true_sum = err_sum.to(torch.int8) ^ sum
+        true_carry = err_carry.to(torch.int8) ^ carry
 
         ori_grad_a = torch.zeros_like(a, dtype=torch.float32)
         # grad_b = torch.zeros_like(b)
         grad_b = None
 
         sum_matrix = (sum - true_sum.to(torch.float32)) * scale
-        carry_matrix = carry.to(torch.float32) * carry_scale
+        carry_matrix = (carry - true_carry.to(torch.float32)) * carry_scale
         # grad_a when a is the input
         # ori_grad_a = (
         #     torch.bmm(sum_matrix.unsqueeze(1), Ds) +          # (N,1,n_bits)
@@ -261,11 +262,11 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         mask_sum = (j_idx >= i_idx) & (j_idx <= mask_idx)
         mask_carry = (j_idx >= i_idx) & (j_idx < mask_idx)
 
-        alt_sum = mask_sum ^ sum
-        alt_carry = mask_carry ^ carry.bool()
+        alt_sum = mask_sum ^ sum.unsqueeze(1)
+        alt_carry = mask_carry ^ carry.bool().unsqueeze(1)
 
-        alt_sum_matrix = (alt_sum - true_sum.to(torch.float32)) * scale
-        alt_carry_matrix = alt_carry.to(torch.float32) * carry_scale
+        alt_sum_matrix = (alt_sum - true_sum.to(torch.float32).unsqueeze(1)) * scale
+        alt_carry_matrix = (alt_carry.to(torch.float32) - true_carry.to(torch.float32).unsqueeze(1)) * carry_scale
 
         # alt_grad_a = (
         #     torch.einsum('bij,bji->bi', alt_sum_matrix, Ds).unsqueeze(1) +

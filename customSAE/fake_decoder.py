@@ -51,7 +51,7 @@ class FakeDecoderTrainer():
         self.training_goal = training_goal
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
         self.sga = surrogate_gradient_adder_dense(n_dim)
-        self.batch_size = 1
+        self.batch_size = 128
 
         self.scale_factor = (2 ** torch.arange(n_dim, device=self.model.weight.device)).float()
         self.scale_factor /= self.scale_factor.sum()
@@ -72,10 +72,7 @@ class FakeDecoderTrainer():
 
                 op = torch.cat((op_1, op_2), dim=1)
 
-                target, carry = self.sga(op)
-
-                if carry[:, -1] > 0:
-                    continue
+                target, target_carry = self.sga(op)
 
             output, carry = self.model(x)
 
@@ -93,17 +90,23 @@ class FakeDecoderTrainer():
             
             # Custom loss that produces gradient of 1 for wrong bits, 0 for correct
             # We multiply the difference by the incorrect_bits mask
-            bit_loss = (incorrect_bits * (output - target_binary)).sum()
+            bit_loss = (incorrect_bits * output).sum()
+
+            incorrect_carry = (carry != target_carry).float()
+            # carry_loss = (incorrect_carry * (carry - target_carry)).sum()
+            carry_loss = (incorrect_carry * carry).sum()
             
-            loss = bit_loss
+            loss = bit_loss + carry_loss
             loss.backward()
 
             self.optimizer.step()
             print(f"Target is {self.training_goal}, current weight is {self.model.weight}")
 
 n_dim = 4
-training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
+# training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
 # training_goal = torch.tensor([1., 0., 1., 0.])
+training_goal = torch.tensor([1., 1., 1., 1.])
+# training_goal = torch.tensor([0., 1., 0., 0.])
 print(training_goal)
 
 trainer = FakeDecoderTrainer(n_dim, training_goal)
