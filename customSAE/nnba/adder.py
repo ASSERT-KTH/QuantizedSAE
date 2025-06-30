@@ -233,10 +233,11 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         scale = 2 ** torch.arange(n_bits, device=a.device, dtype=torch.float32)
         scale /= scale.sum()
         carry_scale = scale * 2
-        carry_scale[:-1] = 0
+        carry_scale[:-1] *= 0.5 ** n_bits
         
         true_sum = err_sum.to(torch.int8) ^ sum
-        true_carry = err_carry.to(torch.int8) ^ carry
+        # true_carry = err_carry.to(torch.int8) ^ carry
+        true_carry = err_carry.to(torch.int8)
 
         ori_grad_a = torch.zeros_like(a, dtype=torch.float32)
         # grad_b = torch.zeros_like(b)

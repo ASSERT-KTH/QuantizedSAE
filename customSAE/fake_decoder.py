@@ -12,6 +12,7 @@ class FakeDecoder(nn.Module):
 
         # nn.init.normal_(self.weight, mean=0.5, std=0.2)
         nn.init.normal_(self.weight, mean=0.25, std=0.1)
+        self.weight.data = torch.tensor([0.75, 0.25, 0.25, 0.25])
         self.weight.data.clamp_(0, 1)
         # self.hook_handle = None
         # self.register_hook()
@@ -92,6 +93,7 @@ class FakeDecoderTrainer():
             # We multiply the difference by the incorrect_bits mask
             bit_loss = (incorrect_bits * output).sum()
 
+            target_carry[:, :-1] = carry[:, :-1]
             incorrect_carry = (carry != target_carry).float()
             # carry_loss = (incorrect_carry * (carry - target_carry)).sum()
             carry_loss = (incorrect_carry * carry).sum()
@@ -105,8 +107,8 @@ class FakeDecoderTrainer():
 n_dim = 4
 # training_goal = torch.bernoulli(torch.ones(n_dim) * 0.5).float()
 # training_goal = torch.tensor([1., 0., 1., 0.])
-training_goal = torch.tensor([1., 1., 1., 1.])
-# training_goal = torch.tensor([0., 1., 0., 0.])
+# training_goal = torch.tensor([1., 1., 1., 1.])
+training_goal = torch.tensor([0., 1., 0., 0.])
 print(training_goal)
 
 trainer = FakeDecoderTrainer(n_dim, training_goal)
