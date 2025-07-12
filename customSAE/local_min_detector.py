@@ -15,47 +15,48 @@ class LocalMinDetector:
         sum = torch.zeros_like(a_binary)
         carry = torch.zeros_like(a_binary)
 
-        Ds = torch.zeros(N, n_bits, n_bits, device=a.device, dtype=torch.float32)
-        Dc = torch.zeros_like(Ds)
+        # Ds = torch.zeros(N, n_bits, n_bits, device=a.device, dtype=torch.float32)
+        # Dc = torch.zeros_like(Ds)
         
         for i in range(n_bits):
             if i == 0:
                 sum[:, i] = a_binary[:, i] ^ b_binary[:, i]  # XOR
                 carry[:, i] = a_binary[:, i] & b_binary[:, i]     # AND
 
-                Ds[:, i, i] = 1 - 2 * b_binary[:, i]
+                # Ds[:, i, i] = 1 - 2 * b_binary[:, i]
                 # Dc[:, i, i] = a_binary[:, i]
-                Dc[:, i, i] = b_binary[:, i]
+                # Dc[:, i, i] = b_binary[:, i]
             else:
                 sum[:, i] = a_binary[:, i] ^ b_binary[:, i] ^ carry[:, i-1]
                 carry[:, i] = (a_binary[:, i] & b_binary[:, i]) | \
                               (a_binary[:, i] & carry[:, i-1]) | \
                               (b_binary[:, i] & carry[:, i-1])
                 
-                Ds[:, i, i] = (1 - 2 * b_binary[:, i]) * (1 - 2 * carry[:, i-1])
+                #Ds[:, i, i] = (1 - 2 * b_binary[:, i]) * (1 - 2 * carry[:, i-1])
                 # Dc[:, i, i] = a_binary[:, i]
-                Dc[:, i, i] = b_binary[:, i] + carry[:, i-1] - b_binary[:, i] * carry[:, i-1]
+                # Dc[:, i, i] = b_binary[:, i] + carry[:, i-1] - b_binary[:, i] * carry[:, i-1]
 
-                ds_dcprev = (1 - 2 * a_binary[:, i]) * (1 - 2 * b_binary[:, i])
+                # ds_dcprev = (1 - 2 * a_binary[:, i]) * (1 - 2 * b_binary[:, i])
                 # dc_dcprev = carry[:, i-1]
-                dc_dcprev = a_binary[:, i] + b_binary[:, i] - a_binary[:, i] * b_binary[:, i]
+                # dc_dcprev = a_binary[:, i] + b_binary[:, i] - a_binary[:, i] * b_binary[:, i]
 
-                Ds[:, i, :i] = ds_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
-                Dc[:, i, :i] = dc_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
+                # Ds[:, i, :i] = ds_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
+                # Dc[:, i, :i] = dc_dcprev.unsqueeze(-1) * Dc[:, i-1, :i]
         
-        propagate = (a_binary ^ b_binary).bool()
-        prop = b_binary.clone()
-        if n_bits > 1:
-            prop[:, 1:] ^= carry[:, :-1]    # bi xor c_{i‑1}.  For j=0, prop = b0.
-        prop = prop.bool()
+        # propagate = (a_binary ^ b_binary).bool()
+        # prop = b_binary.clone()
+        # if n_bits > 1:
+        #     prop[:, 1:] ^= carry[:, :-1]    # bi xor c_{i‑1}.  For j=0, prop = b0.
+        # prop = prop.bool()
 
-        mask_idx = torch.full_like(a_binary, n_bits, dtype=torch.int8)
-        running_mask = torch.full((N,), n_bits, dtype=torch.int8)
-        for i in reversed(range(n_bits)):
-            mask_idx[:, i] = torch.where(prop[:, i], running_mask, torch.full_like(running_mask, i))
-            running_mask = torch.where(propagate[:, i], running_mask, torch.full_like(running_mask, i))
+        # mask_idx = torch.full_like(a_binary, n_bits, dtype=torch.int8)
+        # running_mask = torch.full((N,), n_bits, dtype=torch.int8)
+        # for i in reversed(range(n_bits)):
+        #     mask_idx[:, i] = torch.where(prop[:, i], running_mask, torch.full_like(running_mask, i))
+        #     running_mask = torch.where(propagate[:, i], running_mask, torch.full_like(running_mask, i))
 
-        self.ctx = (a_binary, sum, carry, Ds, Dc, mask_idx, p, n_bits)
+        # self.ctx = (a_binary, sum, carry, Ds, Dc, mask_idx, p, n_bits)
+        self.ctx = (a_binary, sum, carry, p, n_bits)
         
         return sum.float(), carry.float()
     
