@@ -62,11 +62,11 @@ class LocalMinDetector:
     
     def backward(self, err_sum, err_carry):
 
-        a, sum, carry, Ds, Dc, mask_idx, p, n_bits = self.ctx
+        a, sum, carry, p, n_bits = self.ctx
         a = a.float()
-        Ds = Ds.float()
-        Dc = Dc.float()
-        mask_idx = mask_idx.float()
+        # Ds = Ds.float()
+        # Dc = Dc.float()
+        # mask_idx = mask_idx.float()
 
         scale = 2 ** torch.arange(n_bits, device=a.device, dtype=torch.float32)
         scale /= scale.sum()
