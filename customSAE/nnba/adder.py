@@ -67,13 +67,13 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         mask = (-residual_carry) == a[:, -1].unsqueeze(-1)
 
         grad_a = torch.zeros_like(a)
-        grad_a[:, -1] = 2 * (residual_carry.squeeze(-1) < 0).float() - 1
+        grad_a[:, -1] = 1 - 2 * (residual_carry.squeeze(-1) < 0).float()
         mask = mask.expand(a[:, :-1].shape)
-        alt_grad = (2 * a[:, -1] - 1).unsqueeze(-1).expand(a[:, :-1].shape)
+        alt_grad = (1 - 2 * (residual_carry.squeeze(-1) < 0).float()).unsqueeze(-1).expand(a[:, :-1].shape)
         grad_a[:, :-1] = torch.where(mask, 2 * residual_bits - 1, alt_grad)
-        grad_a *= -p * (1 - p) * binary_weights
+        grad_a *= - p * (1 - p) * binary_weights
 
-        return grad_a, None, None, None, None
+        return grad_a, None, None, None
 
 class OptimizedBinaryAdder(nn.Module):
 

@@ -45,8 +45,8 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
         self.transform = transform
         self.gamma = gamma
         self.n_bits = n_bits
-        self.shift_factor = (2**(self.n_bits - 1))
-        self.scale_factor = self.shift_factor / (self.gamma + 1e-5)
+        self.shift_factor = 2**(self.n_bits - 1)
+        self.scale_factor = 2**(self.n_bits - 1) / (self.gamma + 1e-5)
         num_contexts, tokens_per_context, feature_dim = self.data.shape
         
         self.cum_sizes = num_contexts * tokens_per_context
@@ -69,34 +69,35 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
         sample = self.data[context_idx, token_idx, :]  # Each sample is a 512-d tensor
         
         sample = sample.float()
-        return self.quantize(sample)
+        # return self.quantize(sample)
+        return self.quantize_signed(sample)
         # return self.quantize_weighted(sample)
     
     def quantize(self, sample):
 
-        scaled_sample = sample * self.scale_factor + self.shift_factor 
+        scaled_sample = sample * self.scale_factor * 2 + self.shift_factor 
         scaled_sample = torch.clamp(scaled_sample, 0, 2**self.n_bits - 1).round().int()
 
         bit_positions = torch.arange(0, self.n_bits, device=scaled_sample.device)
     
         scaled_sample_expanded = scaled_sample.unsqueeze(-1)
-    
         binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
         # binary_repr = binary_repr * 2 - 1
     
         return binary_repr.view(-1)
 
-    def quantize_weighted(self, sample):
+    def quantize_signed(self, sample):
 
-        scaled_sample = sample * self.scale_factor + self.shift_factor 
-        scaled_sample = torch.clamp(scaled_sample, 0, 2**self.n_bits - 1).round().int()
+        scaled_sample = sample * self.scale_factor
+        scaled_sample = torch.clamp(scaled_sample, -2**(self.n_bits - 1), 2**(self.n_bits - 1) - 1).round().int()
 
         bit_positions = torch.arange(0, self.n_bits, device=scaled_sample.device)
     
-        scaled_sample_expanded = scaled_sample.unsqueeze(-1)
+        mask = (1 << self.n_bits) - 1
+        scaled_sample_expanded = (scaled_sample & mask).unsqueeze(-1)
     
-        # binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
-        binary_repr = (scaled_sample_expanded & (1 << bit_positions)).float() / (1 << bit_positions).sum()
+        binary_repr = ((scaled_sample_expanded >> bit_positions) & 1).float()
+        # binary_repr = binary_repr * 2 - 1
     
         return binary_repr.view(-1)
 

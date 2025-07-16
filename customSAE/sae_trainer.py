@@ -76,98 +76,17 @@ class Trainer():
                 continue
 
             if self.sae_type == 'b_sae':
-                # with torch.profiler.profile(
-                #         activities=[torch.profiler.ProfilerActivity.CPU,
-                #                     torch.profiler.ProfilerActivity.CUDA],
-                #         profile_memory=True,
-                #         record_shapes=True,
-                #         with_stack=True,
-                # ) as prof:
-                #     with torch.inference_mode():
-                #         _ = self.model(batch) 
+
+                latent, loss, trigger = self.model(batch)
                 
-                # print(prof.key_averages().table(sort_by="self_cuda_memory_usage"))
-                # prof.export_chrome_trace("trace.json")
-                # torch.cuda.memory_summary()
-                # exit(0)
-
-                # Debug encoder output
-                with torch.no_grad():
-                    encoder_output = self.model.encode(batch)
-                    if torch.isnan(encoder_output).any():
-                        print(f"Batch {batch_idx}: Encoder output contains NaN!")
-                        # Check encoder weights for NaN
-                        for name, param in self.model.encoder.named_parameters():
-                            if torch.isnan(param).any():
-                                print(f"NaN detected in encoder parameter: {name}")
-                        continue
-
-                # Remove autocast to avoid fp16 precision issues, which can cause gradient overflow
-                # Even with binary values, the ripple-carry calculation can exceed fp16 range
-                symmetry_batch = batch - 0.5
-                latent, recon, carry = self.model(symmetry_batch)
-                
-                # Check for NaN in outputs
-                if torch.isnan(latent).any() or torch.isnan(recon).any() or torch.isnan(carry).any():
-                    print(f"Batch {batch_idx}: NaN in model outputs!")
-                    continue
-
-                batch = batch.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                recon = recon.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-                # carry = carry.view(self.config["batch_size"], self.config["input_dim"], self.config["n_bits"])
-
-                recon_loss = torch.mean((((batch - recon) ** 2) * self.scale_factor).sum(dim=-1))
-                # Mean square error is too small
-                # recon_loss = (((batch - recon) * scale_factor) ** 2).sum()
-                carry_loss = torch.mean((carry * self.scale_factor / self.config["hidden_dim"]).sum(dim=-1))
-                # carry_loss = torch.mean(carry * self.scale_factor[-1] * 2)
-                sparsity_loss = torch.mean(latent.sum(dim=-1))
-                # loss = recon_loss + carry_loss
-
-                loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"] + carry_loss
-                # loss = recon_loss + sparsity_loss * self.config["sparsity_lambda"]
-                # loss = recon_loss
-
-            else:
-                latent, recon = self.model(batch)
-                recon_loss = F.mse_loss(recon, batch)
-                sparsity_loss = torch.mean(torch.abs(latent).sum(dim=-1))
-                # loss = recon_loss + sparsity_loss
-
-
-            # if epoch < 2:
-            #     loss = recon_loss
-            # else:
-            #     pass
-            # loss = recon_loss + self.config["sparsity_lambda"] * sparsity_loss
-
-            # if self.sae_type == "b_sae":
-            #     carry_loss = torch.mean(carry)
-                # carry_loss = self.config["carry_lambda"] * torch.mean(carry ** 2)
-                # loss +=  carry_loss
-
-            # Check if loss is NaN
-            if torch.isnan(loss).any():
-                print(f"Batch {batch_idx}: Loss is NaN! recon_loss={recon_loss.item()}, sparsity_loss={sparsity_loss.item()}")
-                continue
-
-            active_per_sample = latent.sum(dim=1)              # [B]
-            inactive_per_sample = self.config["hidden_dim"] - active_per_sample      # [B]
-            print(inactive_per_sample.float().std())
-
+            active_per_sample = latent.sum(dim=1)
+            inactive_per_sample = self.config["hidden_dim"] - active_per_sample
 
             optimizer.zero_grad(set_to_none=True)
+            trigger.backward(retain_graph=True)
             loss.backward()
 
-            if rigL == True:
-                self.model.decoder.mask_grad()
-
             optimizer.step()
-            
-            # Check for NaN in model parameters after optimization step
-            for name, param in self.model.named_parameters():
-                if torch.isnan(param).any():
-                    print(f"Batch {batch_idx}: NaN detected in {name} after optimizer step")
 
             # For binary latent:
             # inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
@@ -175,15 +94,14 @@ class Trainer():
 
             # For ReLU:
             # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
+            print(loss)
+            print(inactivated_neurons)
 
             if not no_log:
                 # Log metrics
                 if self.sae_type == "b_sae":
                     wandb.log({
                         "loss": loss.item(),
-                        "recon_loss": recon_loss.item(),
-                        "sparsity_loss": sparsity_loss.item(),
-                        "carry_loss": carry_loss.item(),
                         "inactivated_neurons": inactivated_neurons
                         # "inactive_mean" : inactive_per_sample.float().mean(),
                         # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
@@ -227,14 +145,14 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "hidden_dim": 512,
+    "hidden_dim": 2048,
     "gamma": 4,
-    "n_bits": 4,
+    "n_bits": 8,
     "epochs": 1,
     "lr": 1e-5,
     "sparsity_lambda": 1e-7,
     "carry_lambda": 1e-6,
-    "batch_size": 256
+    "batch_size": 32
 }
 
 # no_log = True
