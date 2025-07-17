@@ -155,8 +155,8 @@ config = {
     "batch_size": 32
 }
 
-# no_log = True
-no_log = False
+no_log = True
+# no_log = False
 trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
 
 trainer.train()

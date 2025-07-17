@@ -12,6 +12,7 @@ SAEs/*
 !api/.gitkeep
 !feature_labels/.gitkeep
 !SAEs/.gitkeep
+!SAEs/*.py
 
 outputs/*
 errors/*
