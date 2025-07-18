@@ -101,8 +101,30 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
     
         return binary_repr.view(-1)
 
-def compute_statistic(dataset, batch_size=1000):
+def compute_statistic(dataset, threshold=2, batch_size=1000):
+    """Compute and plot statistics of the dataset.
+
+    In addition to the existing histogram plot, this function now also
+    calculates the ratio of activations whose absolute value is below the
+    provided ``threshold``.
+
+    Args:
+        dataset (torch.utils.data.Dataset): Dataset of activations.
+        threshold (float, optional): Absolute value threshold for counting
+            activations. Defaults to ``0.1``.
+        batch_size (int, optional): Batch size for the DataLoader.
+
+    Returns:
+        float: Ratio of activations with |value| < ``threshold`` across the
+            entire dataset.
+    """
+
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    # Counters for the ratio calculation
+    total_activations = 0
+    activations_under_threshold = 0
+ 
     min_val, max_val = None, None
     n_samples = 0
     mean = 0.0
@@ -117,7 +139,13 @@ def compute_statistic(dataset, batch_size=1000):
             data = batch
 
         batch = data.view(-1)  # Flatten if needed
+
+        # --- Ratio calculation ------------------------------------------------
         num_items = batch.numel()
+        total_activations += num_items
+        activations_under_threshold += (torch.abs(batch) < threshold).sum().item()
+
+        # --- Down-sampling for the histogram ---------------------------------
         k = max(1, num_items // 1000)
         indices = torch.randperm(num_items)[:k]
         data_array = torch.concat((data_array, batch[indices]))
@@ -146,14 +174,21 @@ def compute_statistic(dataset, batch_size=1000):
     plt.hist(data_array, bins=256, density=True, alpha=0.7)
     plt.title('Downsampled Plot')
     plt.savefig("Histogram of activations")
-    # shapiro_test = stats.shapiro(data_array)
-    # print(f"Shapiro-Wilk Test: statistic={shapiro_test[0]:.4f}, p-value={shapiro_test[1]:.4f}")
-    # print(f"Interpretation: {'Data appears normally distributed' if shapiro_test[1] > 0.05 else 'Data does not appear normally distributed'}")
 
-    # std = torch.sqrt(M2 / n_samples)
-    # return mean, std, max_val, min_val
+    # -------------------------------------------------------------------------
+    # Final ratio
+    ratio_under_threshold = (
+        activations_under_threshold / total_activations if total_activations > 0 else 0.0
+    )
 
-# hidden_state_dataset = HiddenStatesTorchDatasetInBinary(os.path.join("dataset/", "the_pile_hidden_states_L3_35.pt"), 4, 4)
+    print(f"The dataset size is {total_activations}, the number of activations under threshold is {activations_under_threshold}")
+    print(
+        f"Ratio of activations with |value| < {threshold}: {ratio_under_threshold:.6f}"
+    )
+
+    return ratio_under_threshold
+
+# hidden_state_dataset = HiddenStatesTorchDataset(os.path.join("dataset/", "the_pile_hidden_states_L3_23.pt"))
 # print(hidden_state_dataset.__getitem__(102).shape)
 # print(hidden_state_dataset.__getitem__(102))
 # print(compute_statistic(hidden_state_dataset))

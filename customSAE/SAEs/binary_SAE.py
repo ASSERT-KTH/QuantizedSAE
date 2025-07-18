@@ -31,16 +31,18 @@ class binary_decoder(nn.Module):
 
         # nn.init.kaiming_normal_(self.weight)
         # nn.init.normal_(self.weight, mean=0.5, std=0.2)
-        nn.init.normal_(self.weight, mean=0.5, std=0.0001)
+        # nn.init.normal_(self.weight, mean=0.5, std=0.0001)
+        self.weight.data = torch.ones(self.weight.shape) * 0.5
         # Clamp outliers to [0, 1]
-        self.weight.data.clamp_(0, 1)
+        self.weight.data.clamp_(0.00001, 0.99999)
         
         self.hook_handle = None
         # self.register_hook()
 
     def store_pre_update_state(self):
         with torch.no_grad():
-            self.prev_weight_states = (self.weight >= self.threshold).clone()
+            self.weight.data.clamp_(0.00001, 0.99999)
+            self.prev_weight_states = (self.weight > self.threshold).clone()
 
     def check_threshold_crossings(self):
 
@@ -48,7 +50,7 @@ class binary_decoder(nn.Module):
             return
         
         with torch.no_grad():
-            current_states = (self.weight >= self.threshold)
+            current_states = (self.weight > self.threshold)
             crossings = (self.prev_weight_states != current_states)
             
             if not crossings.any():
@@ -75,9 +77,9 @@ class binary_decoder(nn.Module):
             
             for i in range(self.n_bits):
                 self.weight.data[:, i::self.n_bits] = torch.where((i < max_indices) & (max_indices != (self.n_bits - 1)), 
-                                                                 0.5 - (first_flip_value - 0.5) / 50., self.weight.data[:, i::self.n_bits])
+                                                                 0.5 - (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
                 self.weight.data[:, i::self.n_bits] = torch.where((i < max_indices) & (max_indices == (self.n_bits - 1)), 
-                                                                 0.5 + (first_flip_value - 0.5) / 50., self.weight.data[:, i::self.n_bits])
+                                                                 0.5 + (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
 
     def register_hook(self):
 
@@ -108,7 +110,7 @@ class binary_decoder(nn.Module):
             ).sum(-1).float()
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
-        loss = 0.5 * (pred - int_sum).float().pow(2).mean()
+        loss = 0.5 * ((pred - int_sum).float()/self.in_features).pow(2).mean()
 
         # For training the decoder:
         with torch.no_grad():
@@ -151,8 +153,10 @@ class BinarySAE(SparseAutoencoder):
 
         self.encoder = nn.Sequential(
             weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
-            nn.LayerNorm(hidden_dim, eps=1e-05),
-            TemperatureSigmoid(temperature=0.5)
+            # nn.Linear(input_dim*self.n_bits, hidden_dim),
+            # nn.LayerNorm(hidden_dim, eps=1e-05),
+            # TemperatureSigmoid(temperature=0.5)
+            nn.Sigmoid()
         )
 
         # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(2/hidden_dim)))
@@ -175,8 +179,11 @@ class BinarySAE(SparseAutoencoder):
             binary_latent = (latent >= 0.5).float()
             # binary_latent = (latent >= 0).float()
 
-        loss, trigger = self.decoder(latent + binary_latent - latent.detach(), x)
-        return binary_latent, loss, trigger
+        latent = latent + binary_latent - latent.detach()
+
+        loss, trigger = self.decoder(latent, x)
+
+        return latent, loss, trigger
 
 # # Setup
 # model = BinarySAE(2, 2, 4)

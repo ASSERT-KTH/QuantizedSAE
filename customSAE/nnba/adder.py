@@ -54,6 +54,7 @@ class OptimizedBinaryAdderFunction(torch.autograd.Function):
         n_bits = ctx.n_bits
 
         binary_weights = 2 ** torch.arange(n_bits, device=a.device)
+        binary_weights = binary_weights.float() / binary_weights.sum()
         binary_weights[-1] *= -1
         
         residual = (true_sum * binary_weights).sum(dim=-1).unsqueeze(-1) - b
