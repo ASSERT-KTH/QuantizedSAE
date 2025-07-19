@@ -9,40 +9,22 @@ from baseSAE.SAE import SparseAutoencoder
 from nnba.adder import *
 
 class binary_decoder(nn.Module):
-    def __init__(self, in_features, out_features, n_bits=8, polarize_factor=0.01):
+    def __init__(self, in_features, out_features, n_bits=8):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.n_bits = n_bits
+        self.scale_factor = 2 ** n_bits - 1
         self.weight = nn.Parameter(torch.Tensor(in_features, out_features*n_bits))
-        self.threshold = 0.5 # For binary SAE
-        self.polarize_factor = polarize_factor
 
-        # Threshold crossing tracking
-        self.prev_weight_states = None
-        self.threshold_crossing_callback = None
-
-        # self.csa = carry_save_adder(n_bits)
-        # self.sga = surrogate_gradient_adder_dense(n_bits)
-        self.ra = residual_adder(n_bits)
-
-        # for param in self.csa.parameters():
-        #     param.requires_grad = False
-
-        # nn.init.kaiming_normal_(self.weight)
-        # nn.init.normal_(self.weight, mean=0.5, std=0.2)
-        # nn.init.normal_(self.weight, mean=0.5, std=0.0001)
-        self.weight.data = torch.ones(self.weight.shape) * 0.5
-        # Clamp outliers to [0, 1]
-        self.weight.data.clamp_(0.00001, 0.99999)
-        
-        self.hook_handle = None
-        # self.register_hook()
+        nn.init.kaiming_normal_(self.weight)
 
     def store_pre_update_state(self):
+
         with torch.no_grad():
-            self.weight.data.clamp_(0.00001, 0.99999)
-            self.prev_weight_states = (self.weight > self.threshold).clone()
+            prob_weights = torch.sigmoid(self.weight)
+            hard_bit = (prob_weights > 0.5).float()
+            self.prev_weight_states = hard_bit
 
     def check_threshold_crossings(self):
 
@@ -50,7 +32,7 @@ class binary_decoder(nn.Module):
             return
         
         with torch.no_grad():
-            current_states = (self.weight > self.threshold)
+            current_states = (torch.sigmoid(self.weight) > 0.5)
             crossings = (self.prev_weight_states != current_states)
             
             if not crossings.any():
@@ -77,62 +59,31 @@ class binary_decoder(nn.Module):
             
             for i in range(self.n_bits):
                 self.weight.data[:, i::self.n_bits] = torch.where((i < max_indices) & (max_indices != (self.n_bits - 1)), 
-                                                                 0.5 - (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
+                                                                 0. - (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
                 self.weight.data[:, i::self.n_bits] = torch.where((i < max_indices) & (max_indices == (self.n_bits - 1)), 
-                                                                 0.5 + (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
-
-    def register_hook(self):
-
-        def weight_hook(grad):
-            distance_from_threshold = torch.where(grad > 0, self.weight, 1 - self.weight)
-            # distance_from_threshold = self.weight * (1 - self.weight)
-
-            return grad * distance_from_threshold
-
-        self.hook_handle = self.weight.register_hook(weight_hook)
+                                                                 0. + (first_flip_value - 0.5) / 500., self.weight.data[:, i::self.n_bits])
 
     def forward(self, latent, true_sum):
-        # Binary weights(feature representations):
-        # self.weight.data.clamp_(0, 1) # Problematic part
-        # clamped_weight = self.weight.clamp(0, 1)
-        hard_weights = self.weight + ((self.weight > self.threshold).float() - self.weight).detach() # Binary SAE x = x.unsqueeze(-1)
+
+        prob_weights = torch.sigmoid(self.weight)
+        hard_bit = (prob_weights > 0.5).float()
+        hard_weights = prob_weights + (hard_bit - prob_weights).detach()
+        # hard_weights = prob_weights
         
         latent = latent.unsqueeze(-1)
-        with torch.no_grad():
-            hard_weights_copy = hard_weights.clone()
-            powers = 2 ** torch.arange(self.n_bits, device=hard_weights_copy.device)
-            powers[-1] *= -1
-            int_weights = (
-                hard_weights_copy.view(self.in_features, -1, self.n_bits) * powers
-            ).sum(-1).float()
-            int_sum = (
-                true_sum.view(true_sum.shape[0], -1, self.n_bits) * powers
-            ).sum(-1).float()
+        powers = 2 ** torch.arange(self.n_bits, device=hard_weights.device)
+        powers[-1] *= -1
+        int_weights = (
+            hard_weights.view(self.in_features, -1, self.n_bits) * powers
+        ).sum(-1).float()
+        int_sum = (
+            true_sum.view(true_sum.shape[0], -1, self.n_bits) * powers
+        ).sum(-1).float()
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
-        loss = 0.5 * ((pred - int_sum).float()/self.in_features).pow(2).mean()
+        loss = 0.5 * ((pred - int_sum).float()/self.scale_factor).pow(2).mean()
 
-        # For training the decoder:
-        with torch.no_grad():
-            latent_copy = latent.clone()
-
-        filtered_features = (latent_copy * hard_weights.unsqueeze(0))
-
-        # Batch, Feature, Neuron, N_bits
-        features_by_neurons = filtered_features.unfold(-1, self.n_bits, self.n_bits).permute(0, 2, 1, 3)
-        features_by_neurons = features_by_neurons.reshape(-1, features_by_neurons.shape[-2], features_by_neurons.shape[-1])
-
-        true_sum_by_neurons = true_sum.repeat(1, self.in_features, 1)
-        true_sum_by_neurons = true_sum_by_neurons.unfold(-1, self.n_bits, self.n_bits).permute(0, 2, 1, 3)
-        true_sum_by_neurons = true_sum_by_neurons.reshape(-1, true_sum_by_neurons.shape[-2], true_sum_by_neurons.shape[-1])
-
-        weight_repeat = self.weight.repeat(latent.shape[0], 1, 1)
-        weight_repeat_by_neurons = weight_repeat.unfold(-1, self.n_bits, self.n_bits).permute(0, 2, 1, 3)
-        weight_repeat_by_neurons = weight_repeat_by_neurons.reshape(-1, weight_repeat_by_neurons.shape[-2], weight_repeat_by_neurons.shape[-1])
-
-        trigger = self.ra(features_by_neurons, weight_repeat_by_neurons, true_sum_by_neurons)
-
-        return loss, trigger
+        return loss
 
 class TemperatureSigmoid(nn.Module):
     def __init__(self, temperature=1.0):
@@ -152,8 +103,9 @@ class BinarySAE(SparseAutoencoder):
         self.n_bits = n_bits
 
         self.encoder = nn.Sequential(
-            weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
+            # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
             # nn.Linear(input_dim*self.n_bits, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             # nn.LayerNorm(hidden_dim, eps=1e-05),
             # TemperatureSigmoid(temperature=0.5)
             nn.Sigmoid()
@@ -171,19 +123,34 @@ class BinarySAE(SparseAutoencoder):
     def check_decoder_threshold_crossings(self):
         return self.decoder.check_threshold_crossings()
     
+    def bin2int(self, x):
+        # x shape: [batch, input_dim*n_bits]
+        # Reshape to [batch, input_dim, n_bits]
+        batch_size = x.shape[0]
+        x_reshaped = x.view(batch_size, self.input_dim, self.n_bits)
+        
+        # Create powers of 2 for binary to integer conversion
+        powers = 2 ** torch.arange(self.n_bits, device=x.device)
+        powers[-1] *= -1  # Make MSB negative for signed representation
+        
+        # Convert binary to integer: multiply by powers and sum over n_bits dimension
+        integers = (x_reshaped * powers).sum(-1)
+        
+        return integers  # shape: [batch, input_dim]
+
     def forward(self, x):
 
-        latent = self.encode(x)
+        x_int = self.bin2int(x)
+        latent = self.encode(x_int)
 
         with torch.no_grad():
-            binary_latent = (latent >= 0.5).float()
-            # binary_latent = (latent >= 0).float()
+            binary_latent = (latent > 0.5).float()
 
         latent = latent + binary_latent - latent.detach()
+        
+        loss = self.decoder(latent, x)
 
-        loss, trigger = self.decoder(latent, x)
-
-        return latent, loss, trigger
+        return latent, loss
 
 # # Setup
 # model = BinarySAE(2, 2, 4)

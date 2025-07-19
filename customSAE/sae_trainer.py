@@ -77,8 +77,8 @@ class Trainer():
 
             if self.sae_type == 'b_sae':
 
-                self.model.store_decoder_pre_update_state()
-                latent, recon_loss, trigger = self.model(batch)
+                # self.model.store_decoder_pre_update_state()
+                latent, recon_loss = self.model(batch)
 
                 active_per_sample = latent.sum(dim=1)
                 inactive_per_sample = self.config["hidden_dim"] - active_per_sample
@@ -88,23 +88,23 @@ class Trainer():
 
                 # loss = recon_loss + sparsity_loss
                 loss = recon_loss
-                
+
                 optimizer.zero_grad(set_to_none=True)
-                trigger.backward(retain_graph=True)
                 loss.backward()
 
                 optimizer.step()
 
-                self.model.check_decoder_threshold_crossings()
+                # self.model.check_decoder_threshold_crossings()
+
                 # For binary latent:
                 # inactivated_neurons = (latent < dead_neuron_threshold).sum(dim=1).float().mean().item()
                 inactivated_neurons = self.config["hidden_dim"] - torch.mean(latent.sum(dim=-1))
 
                 # For ReLU:
                 # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
-                print(recon_loss)
-                print(sparsity_loss)
-                print(inactivated_neurons)
+                # print(recon_loss)
+                # print(sparsity_loss)
+                # print(inactivated_neurons)
 
             if not no_log and batch_idx % 100 == 0:
                 # Log metrics
@@ -157,14 +157,14 @@ class Trainer():
 config = {
     "input_dim": 512,
     "n_bits": 8,
-    "hidden_dim": 2048,
-    # "hidden_dim": 2048 * 8,
+    # "hidden_dim": 2048,
+    "hidden_dim": 2048 * 8,
     "gamma": 2,
     "epochs": 1,
     "lr": 1e-3,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
-    "batch_size": 8
+    "batch_size": 32
 }
 
 # no_log = True
