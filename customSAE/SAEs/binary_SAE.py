@@ -67,7 +67,7 @@ class binary_decoder(nn.Module):
 
         prob_weights = torch.sigmoid(self.weight)
         hard_bit = (prob_weights > 0.5).float()
-        # hard_weights = prob_weights + (hard_bit - prob_weights).detach()
+        # Don't use STE here - let polarization loss handle binarization
         hard_weights = prob_weights
         
         latent = latent.unsqueeze(-1)
@@ -81,8 +81,14 @@ class binary_decoder(nn.Module):
         ).sum(-1).float()
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
-        polarize_loss = (prob_weights*(1-prob_weights)).mean()
-        recon_loss = 0.5 * ((pred - int_sum).float().pow(2)/self.scale_factor).mean()
+        
+        # Use MSE loss without normalization to maintain loss scale
+        # The scale factor in the denominator helps with numerical stability
+        scale_factor = 2 ** (self.n_bits - 1)
+        recon_loss = F.mse_loss(pred, int_sum, reduction='mean') / scale_factor
+        
+        # Adjusted polarization loss to encourage binary values
+        polarize_loss = (prob_weights * (1 - prob_weights)).mean()
 
         return recon_loss, polarize_loss
 
@@ -104,7 +110,7 @@ class BinarySAE(SparseAutoencoder):
         self.n_bits = n_bits
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.k = 0.002
+        self.k = 0.01  # Increased from 0.002 to allow more active neurons
 
         self.encoder = nn.Sequential(
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
@@ -115,9 +121,9 @@ class BinarySAE(SparseAutoencoder):
             # nn.Sigmoid()
         )
 
-        # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(2/hidden_dim)))
-        # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(1/hidden_dim)))
-        nn.init.xavier_uniform_(self.encoder[0].weight, gain=1)
+        # Better initialization for binary inputs
+        # Since inputs are binary (0 or 1), we want smaller initial weights
+        nn.init.xavier_uniform_(self.encoder[0].weight, gain=0.5)
         nn.init.zeros_(self.encoder[0].bias)
 
         self.decoder = binary_decoder(hidden_dim, input_dim, n_bits=self.n_bits)
@@ -148,14 +154,15 @@ class BinarySAE(SparseAutoencoder):
         # x_int = self.bin2int(x)
         # latent = self.encode(x_int)
         latent = self.encode(x)
+        
+        # Top-k selection
         th = latent.topk(int(self.hidden_dim * self.k), dim=1).values[:, -1:]
         binary = (latent >= th).float()
-        latent = latent + binary - latent.detach()
-
-        with torch.no_grad():
-            binary_latent = (latent > 0).float()
-
-        latent = latent + binary_latent - latent.detach()
+        
+        # Straight-through estimator: use binary in forward, but allow gradients to flow
+        latent = latent + (binary - latent).detach()
+        
+        # Now latent is binary (0 or 1) in forward pass, but gradients flow through
         
         recon_loss, polarize_loss = self.decoder(latent, x)
 

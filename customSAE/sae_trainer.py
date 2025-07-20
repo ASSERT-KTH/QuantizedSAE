@@ -56,6 +56,13 @@ class Trainer():
     def one_epoch(self, dataset, wandb, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
+        
+        # Add learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, 
+            T_max=len(dataset) // self.config["batch_size"], 
+            eta_min=self.config["lr"] * 0.1
+        )
 
         # optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"], weight_decay=1e-4)
         # optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config["lr"], alpha=0.9)
@@ -64,6 +71,10 @@ class Trainer():
 
         latent, recon, carry = None, None, None
         batch_idx = 0
+        
+        # Track losses for adaptive weighting
+        recon_losses = []
+        polarize_losses = []
 
         latents = []
         for batch in dataloader:
@@ -85,16 +96,40 @@ class Trainer():
 
                 # sparsity_loss = self.config["sparsity_lambda"] * torch.mean(active_per_sample)
                 sparsity_loss = torch.tensor(0.)
+                
+                # Adaptive loss weighting
+                if len(recon_losses) > 10:
+                    # Calculate running average of losses
+                    avg_recon = sum(recon_losses[-10:]) / 10
+                    avg_polarize = sum(polarize_losses[-10:]) / 10
+                    
+                    # Adjust polarize weight based on relative magnitudes
+                    polarize_weight = min(0.1, avg_recon / (avg_polarize + 1e-8) * 0.01)
+                else:
+                    polarize_weight = 0.01  # Start with small weight
+                
+                recon_losses.append(recon_loss.item())
+                polarize_losses.append(polarize_loss.item())
 
                 # loss = recon_loss + sparsity_loss
-                loss = recon_loss + 0.1 * polarize_loss
+                loss = recon_loss + polarize_weight * polarize_loss
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
 
-                # Clip gradients worse the perf(Aborted):
-                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+                # Gradient clipping for stability
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
+                # Check for gradient issues
+                total_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm += param_norm.item() ** 2
+                total_norm = total_norm ** 0.5
+                
                 optimizer.step()
+                scheduler.step()
 
                 # self.model.check_decoder_threshold_crossings()
 
@@ -104,9 +139,8 @@ class Trainer():
 
                 # For ReLU:
                 # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
-                print(recon_loss)
-                print(sparsity_loss)
-                print(inactivated_neurons)
+                print(f"Batch {batch_idx}: recon_loss={recon_loss:.4f}, polarize_loss={polarize_loss:.4f}, grad_norm={total_norm:.4f}")
+                print(f"Active neurons: {torch.mean(latent.sum(dim=-1)):.1f}")
 
             if not no_log and batch_idx % 100 == 0:
                 # Log metrics
@@ -115,10 +149,14 @@ class Trainer():
                         "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
                         "polarize_loss": polarize_loss.item(),
+                        "polarize_weight": polarize_weight,
                         "sparsity_loss": sparsity_loss.item(),
                         "activated_neurons": torch.mean(latent.sum(dim=-1)).item(),
                         "mag_MSB": self.model.decoder.weight[:, self.config["n_bits"]-1::self.config["n_bits"]].abs().mean().item(),
                         "mag_LSB": self.model.decoder.weight[:, 0::self.config["n_bits"]].abs().mean().item(),
+                        "gradient_norm": total_norm,
+                        "learning_rate": scheduler.get_last_lr()[0],
+                        "temperature": self.model.temperature.item() if hasattr(self.model, 'temperature') else 1.0,
                         # "inactive_mean" : inactive_per_sample.float().mean(),
                         # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
                     })
@@ -166,10 +204,10 @@ config = {
     "hidden_dim": 2048 * 8,
     "gamma": 2,
     "epochs": 1,
-    "lr": 1e-3,
+    "lr": 5e-4,  # Reduced learning rate for stability
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
-    "batch_size": 1024
+    "batch_size": 512  # Smaller batch size for better gradient estimates
 }
 
 # no_log = True
