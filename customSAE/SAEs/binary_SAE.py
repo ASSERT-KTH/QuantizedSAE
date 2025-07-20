@@ -67,8 +67,8 @@ class binary_decoder(nn.Module):
 
         prob_weights = torch.sigmoid(self.weight)
         hard_bit = (prob_weights > 0.5).float()
-        # Use straight-through estimator for better gradient flow
-        hard_weights = prob_weights + (hard_bit - prob_weights).detach()
+        # Don't use STE here - let polarization loss handle binarization
+        hard_weights = prob_weights
         
         latent = latent.unsqueeze(-1)
         powers = 2 ** torch.arange(self.n_bits, device=hard_weights.device)
@@ -82,14 +82,10 @@ class binary_decoder(nn.Module):
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
         
-        # Improved loss computation with better scaling
-        # Normalize by the expected range of values
-        max_val = 2 ** (self.n_bits - 1)
-        normalized_pred = pred / max_val
-        normalized_true = int_sum / max_val
-        
-        # Use smooth L1 loss for better stability
-        recon_loss = F.smooth_l1_loss(normalized_pred, normalized_true, reduction='mean')
+        # Use MSE loss without normalization to maintain loss scale
+        # The scale factor in the denominator helps with numerical stability
+        scale_factor = 2 ** (self.n_bits - 1)
+        recon_loss = F.mse_loss(pred, int_sum, reduction='mean') / scale_factor
         
         # Adjusted polarization loss to encourage binary values
         polarize_loss = (prob_weights * (1 - prob_weights)).mean()
@@ -114,7 +110,7 @@ class BinarySAE(SparseAutoencoder):
         self.n_bits = n_bits
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.k = 0.002
+        self.k = 0.01  # Increased from 0.002 to allow more active neurons
         
         # Add temperature for better gradient flow
         self.temperature = nn.Parameter(torch.tensor(1.0))
@@ -128,9 +124,9 @@ class BinarySAE(SparseAutoencoder):
             # nn.Sigmoid()
         )
 
-        # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(2/hidden_dim)))
-        # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(1/hidden_dim)))
-        nn.init.xavier_uniform_(self.encoder[0].weight, gain=1)
+        # Better initialization for binary inputs
+        # Since inputs are binary (0 or 1), we want smaller initial weights
+        nn.init.xavier_uniform_(self.encoder[0].weight, gain=0.5)
         nn.init.zeros_(self.encoder[0].bias)
 
         self.decoder = binary_decoder(hidden_dim, input_dim, n_bits=self.n_bits)
