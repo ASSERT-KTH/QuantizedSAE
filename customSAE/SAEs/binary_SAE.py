@@ -67,8 +67,8 @@ class binary_decoder(nn.Module):
 
         prob_weights = torch.sigmoid(self.weight)
         hard_bit = (prob_weights > 0.5).float()
-        hard_weights = prob_weights + (hard_bit - prob_weights).detach()
-        # hard_weights = prob_weights
+        # hard_weights = prob_weights + (hard_bit - prob_weights).detach()
+        hard_weights = prob_weights
         
         latent = latent.unsqueeze(-1)
         powers = 2 ** torch.arange(self.n_bits, device=hard_weights.device)
@@ -81,9 +81,10 @@ class binary_decoder(nn.Module):
         ).sum(-1).float()
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
-        loss = 0.5 * ((pred - int_sum).float()/self.scale_factor).pow(2).mean()
+        polarize_loss = (prob_weights*(1-prob_weights)).mean()
+        recon_loss = 0.5 * ((pred - int_sum).float()/self.scale_factor).pow(2).mean()
 
-        return loss
+        return recon_loss, polarize_loss
 
 class TemperatureSigmoid(nn.Module):
     def __init__(self, temperature=1.0):
@@ -101,18 +102,22 @@ class BinarySAE(SparseAutoencoder):
         super().__init__(input_dim, hidden_dim)
 
         self.n_bits = n_bits
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.k = 0.005
 
         self.encoder = nn.Sequential(
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
-            # nn.Linear(input_dim*self.n_bits, hidden_dim),
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim*self.n_bits, hidden_dim),
+            # nn.Linear(input_dim, hidden_dim)
             # nn.LayerNorm(hidden_dim, eps=1e-05),
             # TemperatureSigmoid(temperature=0.5)
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
 
         # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(2/hidden_dim)))
-        nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(1/hidden_dim)))
+        # nn.init.normal_(self.encoder[0].weight, std=torch.sqrt(torch.tensor(1/hidden_dim)))
+        nn.init.xavier_uniform_(self.encoder[0].weight, gain=1)
         nn.init.zeros_(self.encoder[0].bias)
 
         self.decoder = binary_decoder(hidden_dim, input_dim, n_bits=self.n_bits)
@@ -140,17 +145,21 @@ class BinarySAE(SparseAutoencoder):
 
     def forward(self, x):
 
-        x_int = self.bin2int(x)
-        latent = self.encode(x_int)
+        # x_int = self.bin2int(x)
+        # latent = self.encode(x_int)
+        latent = self.encode(x)
+        th = latent.topk(int(self.hidden_dim * self.k), dim=1).values[:, -1:]
+        binary = (latent >= th).float()
+        latent = latent + binary - latent.detach()
 
         with torch.no_grad():
-            binary_latent = (latent > 0.5).float()
+            binary_latent = (latent > 0).float()
 
         latent = latent + binary_latent - latent.detach()
         
-        loss = self.decoder(latent, x)
+        recon_loss, polarize_loss = self.decoder(latent, x)
 
-        return latent, loss
+        return latent, recon_loss, polarize_loss
 
 # # Setup
 # model = BinarySAE(2, 2, 4)

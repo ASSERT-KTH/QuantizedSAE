@@ -78,7 +78,7 @@ class Trainer():
             if self.sae_type == 'b_sae':
 
                 # self.model.store_decoder_pre_update_state()
-                latent, recon_loss = self.model(batch)
+                latent, recon_loss, polarize_loss = self.model(batch)
 
                 active_per_sample = latent.sum(dim=1)
                 inactive_per_sample = self.config["hidden_dim"] - active_per_sample
@@ -87,11 +87,13 @@ class Trainer():
                 sparsity_loss = torch.tensor(0.)
 
                 # loss = recon_loss + sparsity_loss
-                loss = recon_loss
+                loss = recon_loss + polarize_loss
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
 
+                # Clip gradients worse the perf(Aborted):
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
                 optimizer.step()
 
                 # self.model.check_decoder_threshold_crossings()
@@ -102,9 +104,9 @@ class Trainer():
 
                 # For ReLU:
                 # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
-                # print(recon_loss)
-                # print(sparsity_loss)
-                # print(inactivated_neurons)
+                print(recon_loss)
+                print(sparsity_loss)
+                print(inactivated_neurons)
 
             if not no_log and batch_idx % 100 == 0:
                 # Log metrics
@@ -112,8 +114,11 @@ class Trainer():
                     wandb.log({
                         "loss": loss.item(),
                         "recon_loss": recon_loss.item(),
+                        "polarize_loss": polarize_loss.item(),
                         "sparsity_loss": sparsity_loss.item(),
-                        "activated_neurons": torch.mean(latent.sum(dim=-1)).item()
+                        "activated_neurons": torch.mean(latent.sum(dim=-1)).item(),
+                        "mag_MSB": self.model.decoder.weight[:, self.config["n_bits"]-1::self.config["n_bits"]].abs().mean().item(),
+                        "mag_LSB": self.model.decoder.weight[:, 0::self.config["n_bits"]].abs().mean().item(),
                         # "inactive_mean" : inactive_per_sample.float().mean(),
                         # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
                     })
@@ -164,7 +169,7 @@ config = {
     "lr": 1e-3,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
-    "batch_size": 32
+    "batch_size": 64
 }
 
 # no_log = True
