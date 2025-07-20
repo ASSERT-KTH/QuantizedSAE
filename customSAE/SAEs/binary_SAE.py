@@ -111,9 +111,6 @@ class BinarySAE(SparseAutoencoder):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.k = 0.01  # Increased from 0.002 to allow more active neurons
-        
-        # Add temperature for better gradient flow
-        self.temperature = nn.Parameter(torch.tensor(1.0))
 
         self.encoder = nn.Sequential(
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
@@ -158,20 +155,18 @@ class BinarySAE(SparseAutoencoder):
         # latent = self.encode(x_int)
         latent = self.encode(x)
         
-        # Use temperature-based sigmoid for differentiable binarization
-        latent_normalized = torch.sigmoid(latent / self.temperature)
-        
-        # Top-k selection with soft threshold
+        # Top-k selection
         th = latent.topk(int(self.hidden_dim * self.k), dim=1).values[:, -1:]
-        mask = torch.sigmoid((latent - th) / (self.temperature * 0.1))
+        binary = (latent >= th).float()
         
-        # Apply mask with straight-through estimator
-        binary_latent = (mask > 0.5).float()
-        latent_binary = mask + (binary_latent - mask).detach()
+        # Straight-through estimator: use binary in forward, but allow gradients to flow
+        latent = latent + (binary - latent).detach()
         
-        recon_loss, polarize_loss = self.decoder(latent_binary, x)
+        # Now latent is binary (0 or 1) in forward pass, but gradients flow through
+        
+        recon_loss, polarize_loss = self.decoder(latent, x)
 
-        return latent_binary, recon_loss, polarize_loss
+        return latent, recon_loss, polarize_loss
 
 # # Setup
 # model = BinarySAE(2, 2, 4)
