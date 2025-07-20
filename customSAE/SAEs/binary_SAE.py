@@ -67,8 +67,8 @@ class binary_decoder(nn.Module):
 
         prob_weights = torch.sigmoid(self.weight)
         hard_bit = (prob_weights > 0.5).float()
-        # hard_weights = prob_weights + (hard_bit - prob_weights).detach()
-        hard_weights = prob_weights
+        # Use straight-through estimator for better gradient flow
+        hard_weights = prob_weights + (hard_bit - prob_weights).detach()
         
         latent = latent.unsqueeze(-1)
         powers = 2 ** torch.arange(self.n_bits, device=hard_weights.device)
@@ -81,8 +81,18 @@ class binary_decoder(nn.Module):
         ).sum(-1).float()
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
-        polarize_loss = (prob_weights*(1-prob_weights)).mean()
-        recon_loss = 0.5 * ((pred - int_sum).float().pow(2)/self.scale_factor).mean()
+        
+        # Improved loss computation with better scaling
+        # Normalize by the expected range of values
+        max_val = 2 ** (self.n_bits - 1)
+        normalized_pred = pred / max_val
+        normalized_true = int_sum / max_val
+        
+        # Use smooth L1 loss for better stability
+        recon_loss = F.smooth_l1_loss(normalized_pred, normalized_true, reduction='mean')
+        
+        # Adjusted polarization loss to encourage binary values
+        polarize_loss = (prob_weights * (1 - prob_weights)).mean()
 
         return recon_loss, polarize_loss
 
@@ -105,6 +115,9 @@ class BinarySAE(SparseAutoencoder):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.k = 0.002
+        
+        # Add temperature for better gradient flow
+        self.temperature = nn.Parameter(torch.tensor(1.0))
 
         self.encoder = nn.Sequential(
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
@@ -148,18 +161,21 @@ class BinarySAE(SparseAutoencoder):
         # x_int = self.bin2int(x)
         # latent = self.encode(x_int)
         latent = self.encode(x)
-        th = latent.topk(int(self.hidden_dim * self.k), dim=1).values[:, -1:]
-        binary = (latent >= th).float()
-        latent = latent + binary - latent.detach()
-
-        with torch.no_grad():
-            binary_latent = (latent > 0).float()
-
-        latent = latent + binary_latent - latent.detach()
         
-        recon_loss, polarize_loss = self.decoder(latent, x)
+        # Use temperature-based sigmoid for differentiable binarization
+        latent_normalized = torch.sigmoid(latent / self.temperature)
+        
+        # Top-k selection with soft threshold
+        th = latent.topk(int(self.hidden_dim * self.k), dim=1).values[:, -1:]
+        mask = torch.sigmoid((latent - th) / (self.temperature * 0.1))
+        
+        # Apply mask with straight-through estimator
+        binary_latent = (mask > 0.5).float()
+        latent_binary = mask + (binary_latent - mask).detach()
+        
+        recon_loss, polarize_loss = self.decoder(latent_binary, x)
 
-        return latent, recon_loss, polarize_loss
+        return latent_binary, recon_loss, polarize_loss
 
 # # Setup
 # model = BinarySAE(2, 2, 4)
