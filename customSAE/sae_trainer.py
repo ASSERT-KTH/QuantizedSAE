@@ -87,7 +87,7 @@ class Trainer():
                 sparsity_loss = torch.tensor(0.)
 
                 # loss = recon_loss + sparsity_loss
-                loss = recon_loss + polarize_loss
+                loss = recon_loss + 0.1 * polarize_loss
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -169,7 +169,7 @@ config = {
     "lr": 1e-3,
     "sparsity_lambda": 1e-6,
     "carry_lambda": 1e-6,
-    "batch_size": 64
+    "batch_size": 1024
 }
 
 # no_log = True

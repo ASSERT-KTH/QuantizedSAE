@@ -14,7 +14,7 @@ class binary_decoder(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.n_bits = n_bits
-        self.scale_factor = 2 ** n_bits - 1
+        self.scale_factor = 2 ** (n_bits - 1)
         self.weight = nn.Parameter(torch.Tensor(in_features, out_features*n_bits))
 
         nn.init.kaiming_normal_(self.weight)
@@ -82,7 +82,7 @@ class binary_decoder(nn.Module):
         
         pred = (latent * int_weights.unsqueeze(0)).sum(-2)
         polarize_loss = (prob_weights*(1-prob_weights)).mean()
-        recon_loss = 0.5 * ((pred - int_sum).float()/self.scale_factor).pow(2).mean()
+        recon_loss = 0.5 * ((pred - int_sum).float().pow(2)/self.scale_factor).mean()
 
         return recon_loss, polarize_loss
 
@@ -104,7 +104,7 @@ class BinarySAE(SparseAutoencoder):
         self.n_bits = n_bits
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.k = 0.005
+        self.k = 0.002
 
         self.encoder = nn.Sequential(
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
