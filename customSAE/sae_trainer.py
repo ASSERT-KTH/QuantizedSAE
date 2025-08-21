@@ -10,6 +10,7 @@ import math
 from SAEs.ternary_SAE import *
 from SAEs.binary_latent_SAE import *
 from SAEs.binary_SAE import *
+from SAEs.quantized_matryoshka_SAE import *
 import numpy as np
 
 class Trainer():
@@ -37,6 +38,8 @@ class Trainer():
             self.scale_factor = torch.pow(2, torch.arange(self.config["n_bits"])).to(self.device)
             self.scale_factor = self.scale_factor / self.scale_factor.sum().float()
             # self.model = torch.compile(self.model, mode="reduce-overhead")
+        elif sae_type == "q_sae":
+            self.model = QuantizedMatryoshkaSAE(self.config["input_dim"], self.config["hidden_dim"], self.config["top_k"], self.config["gamma"], self.config["n_bits"]).to(self.device)
 
         self.epoch = 0
         self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
@@ -53,7 +56,7 @@ class Trainer():
             wandb.init(project=proj_name, config=config)
             wandb.watch(self.model, log="all", log_freq=256)
 
-    def one_epoch(self, dataset, wandb, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
+    def one_epoch(self, dataset, dead_neuron_threshold=0.2, no_log=False, rigL=False, f_decay=None):
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"])
 
@@ -74,6 +77,19 @@ class Trainer():
             if torch.isnan(batch).any():
                 print(f"Batch {batch_idx} contains NaN values before forward pass!")
                 continue
+
+            if self.sae_type == "q_sae":
+                recon_groups = self.model(batch)  # list of length n_bits, each [B, input_dim]
+
+                optimizer.zero_grad(set_to_none=True)
+
+                group_losses = [F.mse_loss(recon_groups[i], batch) for i in range(self.config["n_bits"])]
+                print(group_losses)
+                loss_total = sum(group_losses)
+                loss_total.backward()
+
+                self.model.decoder.apply_secant_grad()
+                optimizer.step()
 
             if self.sae_type == 'b_sae':
 
@@ -122,6 +138,10 @@ class Trainer():
                         # "inactive_mean" : inactive_per_sample.float().mean(),
                         # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
                     })
+                elif self.sae_type == "q_sae":
+                    log_dict = {f"recon_loss_group_{i}": group_losses[i].item() for i in range(self.config["n_bits"])}
+                    log_dict["recon_loss_total"] = loss_total.item()
+                    wandb.log(log_dict)
                 else:
                     wandb.log({
                         "loss": loss.item(),
@@ -148,7 +168,7 @@ class Trainer():
                 self.model.decoder.update_mask(f_decay, 0.7)
             else:
                 f_decay = None
-            self.one_epoch(dataset, wandb, dead_neuron_threshold=0.2, no_log=self.no_log, rigL=self.rigL, f_decay=f_decay)
+            self.one_epoch(dataset, dead_neuron_threshold=0.2, no_log=self.no_log, rigL=self.rigL, f_decay=f_decay)
 
         if not self.no_log:
             wandb.finish()
@@ -161,19 +181,20 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "n_bits": 8,
+    "n_bits": 4,
     # "hidden_dim": 2048,
     "hidden_dim": 2048 * 8,
-    "gamma": 2,
+    "gamma": 4,
     "epochs": 1,
-    "lr": 1e-3,
+    "lr": 1e-6,
+    "top_k": 32,
     "sparsity_lambda": 1e-6,
-    "carry_lambda": 1e-6,
-    "batch_size": 1024
+    "batch_size": 1024 * 32
 }
 
 # no_log = True
 no_log = False
-trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
+# trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
+trainer = Trainer(config, "q_sae", False, no_log, "quantized_matryoshka_sae_training")
 
 trainer.train()

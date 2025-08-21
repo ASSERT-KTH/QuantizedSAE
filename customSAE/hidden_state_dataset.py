@@ -1,8 +1,8 @@
 import torch
 import os
 from torch.utils.data import Dataset, DataLoader
-from scipy import stats
-import matplotlib.pyplot as plt
+# from scipy import stats
+# import matplotlib.pyplot as plt
 
 class HiddenStatesTorchDataset(Dataset):
 
@@ -101,94 +101,94 @@ class HiddenStatesTorchDatasetInBinary(Dataset):
     
         return binary_repr.view(-1)
 
-def compute_statistic(dataset, threshold=2, batch_size=1000):
-    """Compute and plot statistics of the dataset.
-
-    In addition to the existing histogram plot, this function now also
-    calculates the ratio of activations whose absolute value is below the
-    provided ``threshold``.
-
-    Args:
-        dataset (torch.utils.data.Dataset): Dataset of activations.
-        threshold (float, optional): Absolute value threshold for counting
-            activations. Defaults to ``0.1``.
-        batch_size (int, optional): Batch size for the DataLoader.
-
-    Returns:
-        float: Ratio of activations with |value| < ``threshold`` across the
-            entire dataset.
-    """
-
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-    # Counters for the ratio calculation
-    total_activations = 0
-    activations_under_threshold = 0
- 
-    min_val, max_val = None, None
-    n_samples = 0
-    mean = 0.0
-    M2 = 0.0  # For variance calculation
-    data_array = torch.tensor([])
-
-    for batch in loader:
-        # Assume batch is a tuple (features, target), adjust as needed
-        if isinstance(batch, (list, tuple)):
-            data = batch[0]
-        else:
-            data = batch
-
-        batch = data.view(-1)  # Flatten if needed
-
-        # --- Ratio calculation ------------------------------------------------
-        num_items = batch.numel()
-        total_activations += num_items
-        activations_under_threshold += (torch.abs(batch) < threshold).sum().item()
-
-        # --- Down-sampling for the histogram ---------------------------------
-        k = max(1, num_items // 1000)
-        indices = torch.randperm(num_items)[:k]
-        data_array = torch.concat((data_array, batch[indices]))
-
-        # batch_min = batch.min()
-        # batch_max = batch.max()
-
-        # if min_val is None:
-        #     min_val = batch_min
-        #     max_val = batch_max
-        # else:
-        #     min_val = torch.min(min_val, batch_min)
-        #     max_val = torch.max(max_val, batch_max)
-
-        # batch_samples = batch.size(0)
-        # n_samples += batch_samples
-
-        # batch_mean = batch.mean()
-        # batch_var = batch.var(unbiased=False)
-
-        # delta = batch_mean - mean
-        # mean += delta * batch_samples / n_samples
-        # M2 += batch_var * batch_samples + (delta ** 2) * batch_samples * (n_samples - batch_samples) / n_samples
-
-    plt.figure(figsize=(10, 6))
-    plt.hist(data_array, bins=256, density=True, alpha=0.7)
-    plt.title('Downsampled Plot')
-    plt.savefig("Histogram of activations")
-
-    # -------------------------------------------------------------------------
-    # Final ratio
-    ratio_under_threshold = (
-        activations_under_threshold / total_activations if total_activations > 0 else 0.0
-    )
-
-    print(f"The dataset size is {total_activations}, the number of activations under threshold is {activations_under_threshold}")
-    print(
-        f"Ratio of activations with |value| < {threshold}: {ratio_under_threshold:.6f}"
-    )
-
-    return ratio_under_threshold
-
-# hidden_state_dataset = HiddenStatesTorchDataset(os.path.join("dataset/", "the_pile_hidden_states_L3_23.pt"))
-# print(hidden_state_dataset.__getitem__(102).shape)
-# print(hidden_state_dataset.__getitem__(102))
-# print(compute_statistic(hidden_state_dataset))
+# def compute_statistic(dataset, threshold=2, batch_size=1000):
+#     """Compute and plot statistics of the dataset.
+# 
+#     In addition to the existing histogram plot, this function now also
+#     calculates the ratio of activations whose absolute value is below the
+#     provided ``threshold``.
+# 
+#     Args:
+#         dataset (torch.utils.data.Dataset): Dataset of activations.
+#         threshold (float, optional): Absolute value threshold for counting
+#             activations. Defaults to ``0.1``.
+#         batch_size (int, optional): Batch size for the DataLoader.
+# 
+#     Returns:
+#         float: Ratio of activations with |value| < ``threshold`` across the
+#             entire dataset.
+#     """
+# 
+#     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+# 
+#     # Counters for the ratio calculation
+#     total_activations = 0
+#     activations_under_threshold = 0
+#  
+#     min_val, max_val = None, None
+#     n_samples = 0
+#     mean = 0.0
+#     M2 = 0.0  # For variance calculation
+#     data_array = torch.tensor([])
+# 
+#     for batch in loader:
+#         # Assume batch is a tuple (features, target), adjust as needed
+#         if isinstance(batch, (list, tuple)):
+#             data = batch[0]
+#         else:
+#             data = batch
+# 
+#         batch = data.view(-1)  # Flatten if needed
+# 
+#         # --- Ratio calculation ------------------------------------------------
+#         num_items = batch.numel()
+#         total_activations += num_items
+#         activations_under_threshold += (torch.abs(batch) < threshold).sum().item()
+# 
+#         # --- Down-sampling for the histogram ---------------------------------
+#         k = max(1, num_items // 1000)
+#         indices = torch.randperm(num_items)[:k]
+#         data_array = torch.concat((data_array, batch[indices]))
+# 
+#         # batch_min = batch.min()
+#         # batch_max = batch.max()
+# 
+#         # if min_val is None:
+#         #     min_val = batch_min
+#         #     max_val = batch_max
+#         # else:
+#         #     min_val = torch.min(min_val, batch_min)
+#         #     max_val = torch.max(max_val, batch_max)
+# 
+#         # batch_samples = batch.size(0)
+#         # n_samples += batch_samples
+# 
+#         # batch_mean = batch.mean()
+#         # batch_var = batch.var(unbiased=False)
+# 
+#         # delta = batch_mean - mean
+#         # mean += delta * batch_samples / n_samples
+#         # M2 += batch_var * batch_samples + (delta ** 2) * batch_samples * (n_samples - batch_samples) / n_samples
+# 
+#     plt.figure(figsize=(10, 6))
+#     plt.hist(data_array, bins=256, density=True, alpha=0.7)
+#     plt.title('Downsampled Plot')
+#     plt.savefig("Histogram of activations")
+# 
+#     # -------------------------------------------------------------------------
+#     # Final ratio
+#     ratio_under_threshold = (
+#         activations_under_threshold / total_activations if total_activations > 0 else 0.0
+#     )
+# 
+#     print(f"The dataset size is {total_activations}, the number of activations under threshold is {activations_under_threshold}")
+#     print(
+#         f"Ratio of activations with |value| < {threshold}: {ratio_under_threshold:.6f}"
+#     )
+# 
+#     return ratio_under_threshold
+# 
+# # hidden_state_dataset = HiddenStatesTorchDataset(os.path.join("dataset/", "the_pile_hidden_states_L3_23.pt"))
+# # print(hidden_state_dataset.__getitem__(102).shape)
+# # print(hidden_state_dataset.__getitem__(102))
+# # print(compute_statistic(hidden_state_dataset))

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils.parametrizations import weight_norm
 import os
 import sys 
 sys.path.insert(0, os.getcwd())
@@ -107,6 +106,7 @@ class BinarySAE(SparseAutoencoder):
         self.k = 0.002
 
         self.encoder = nn.Sequential(
+            # If needed: from torch.nn.utils import weight_norm
             # weight_norm(nn.Linear(input_dim*self.n_bits, hidden_dim), name="weight", dim=0),
             nn.Linear(input_dim*self.n_bits, hidden_dim),
             # nn.Linear(input_dim, hidden_dim)
