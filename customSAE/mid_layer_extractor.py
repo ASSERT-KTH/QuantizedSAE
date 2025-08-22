@@ -2,6 +2,7 @@ import os
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 from transformer_inspector import TransformerInspector
+import time
 
 def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, length=50, fill='█'):
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / total))
@@ -78,23 +79,49 @@ class MidLayerExtractor:
 
         self.process_batch(output_path)
 
-    def process_directory(self, data_dir, output_dir):
+    def process_directory(self, data_dir, output_dir, poll_interval=5, watch=True):
 
         # DEBUG:
         # k = 2
 
         os.makedirs(output_dir, exist_ok=True)
-        chunk_files = [f for f in os.listdir(data_dir) if f.startswith('the_pile_deduplicated_4m_') and f.endswith('.pt')]
-        # chunk_files = [f for f in chunk_files if int(f.replace('the_pile_deduplicated_4m_', '').replace('.pt', '')) <= k]
 
-        for chunk_file in chunk_files:
-            chunk_path = os.path.join(data_dir, chunk_file)
-            output_file = chunk_file.replace('the_pile_deduplicated_4m_', f'the_pile_hidden_states_L{self.layer_k}_')
-            output_path = os.path.join(output_dir, output_file)
-            if os.path.exists(output_path):
-                continue
-            print(output_path)
-            self.process_chunk(chunk_path, output_path)
+        if watch:
+            print(f"Watching '{data_dir}' for new 'the_pile_deduplicated_4m_' files (every {poll_interval}s)...")
+            while True:
+                chunk_files = [
+                    f for f in os.listdir(data_dir)
+                    if f.startswith('the_pile_deduplicated_4m_') and f.endswith('.pt')
+                ]
+                # chunk_files = [f for f in chunk_files if int(f.replace('the_pile_deduplicated_4m_', '').replace('.pt', '')) <= k]
+
+                for chunk_file in sorted(chunk_files):
+                    chunk_path = os.path.join(data_dir, chunk_file)
+                    output_file = chunk_file.replace('the_pile_deduplicated_4m_', f'the_pile_hidden_states_L{self.layer_k}_')
+                    output_path = os.path.join(output_dir, output_file)
+                    if os.path.exists(output_path):
+                        continue
+                    print(output_path)
+                    try:
+                        self.process_chunk(chunk_path, output_path)
+                    except Exception as e:
+                        print(f"Failed processing {chunk_file}: {e}")
+                time.sleep(poll_interval)
+        else:
+            chunk_files = [
+                f for f in os.listdir(data_dir)
+                if f.startswith('the_pile_deduplicated_4m_') and f.endswith('.pt')
+            ]
+            # chunk_files = [f for f in chunk_files if int(f.replace('the_pile_deduplicated_4m_', '').replace('.pt', '')) <= k]
+
+            for chunk_file in sorted(chunk_files):
+                chunk_path = os.path.join(data_dir, chunk_file)
+                output_file = chunk_file.replace('the_pile_deduplicated_4m_', f'the_pile_hidden_states_L{self.layer_k}_')
+                output_path = os.path.join(output_dir, output_file)
+                if os.path.exists(output_path):
+                    continue
+                print(output_path)
+                self.process_chunk(chunk_path, output_path)
 
 if __name__ == "__main__":
     # device = "cuda" if torch.cuda.is_available() else "cpu"

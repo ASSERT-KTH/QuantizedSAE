@@ -48,7 +48,7 @@ class Trainer():
         self.rigL = rigL
         self.connection_fraction_to_update = 0.3
 
-        self.model_path = "SAEs/" + sae_type + "_" + str(self.config["hidden_dim"]) + "rigL" if rigL else "" + ".pth"
+        self.model_path = "SAEs/" + sae_type + "_" + str(self.config["hidden_dim"]) + ("_rigL" if rigL else "") + ".pth"
 
         # Initialize W&B
         self.no_log = no_log
@@ -79,13 +79,23 @@ class Trainer():
                 continue
 
             if self.sae_type == "q_sae":
-                recon_groups = self.model(batch)  # list of length n_bits, each [B, input_dim]
+                latent_group, recon_groups = self.model(batch)  # list of length n_bits, each [B, input_dim]
 
                 optimizer.zero_grad(set_to_none=True)
 
-                group_losses = [F.mse_loss(recon_groups[i], batch) for i in range(self.config["n_bits"])]
-                print(group_losses)
-                loss_total = sum(group_losses)
+                losses = []
+                prev = torch.zeros_like(batch)
+                for i, recon in enumerate(recon_groups):
+                    # Residual loss:
+                    # inc = recon - prev
+                    # target_residual = (batch - prev).detach()
+                    # losses.append(F.mse_loss(inc, target_residual))
+                    # prev = recon
+
+                    # Total loss:
+                    losses.append(F.mse_loss(recon, batch))
+
+                loss_total = sum(losses)
                 loss_total.backward()
 
                 self.model.decoder.apply_secant_grad()
@@ -120,9 +130,9 @@ class Trainer():
 
                 # For ReLU:
                 # dead_neurons = (h == 0).sum(dim=1).float().mean().item()
-                print(recon_loss)
-                print(sparsity_loss)
-                print(inactivated_neurons)
+                # print(recon_loss)
+                # print(sparsity_loss)
+                # print(inactivated_neurons)
 
             if not no_log and batch_idx % 100 == 0:
                 # Log metrics
@@ -139,8 +149,9 @@ class Trainer():
                         # "inactive_std"  : inactive_per_sample.float().std(),  # <= new!
                     })
                 elif self.sae_type == "q_sae":
-                    log_dict = {f"recon_loss_group_{i}": group_losses[i].item() for i in range(self.config["n_bits"])}
+                    log_dict = {f"recon_loss_group_{i}": losses[i].item() for i in range(self.config["n_bits"])}
                     log_dict["recon_loss_total"] = loss_total.item()
+                    log_dict.update({f"L0 of latent_group_{i}": latent_group[i].item() for i in range(self.config["n_bits"])})
                     wandb.log(log_dict)
                 else:
                     wandb.log({
@@ -184,12 +195,12 @@ config = {
     "n_bits": 4,
     # "hidden_dim": 2048,
     "hidden_dim": 2048 * 8,
-    "gamma": 4,
+    "gamma": 2,
     "epochs": 1,
-    "lr": 1e-6,
+    "lr": 1e-4,
     "top_k": 32,
     "sparsity_lambda": 1e-6,
-    "batch_size": 1024 * 32
+    "batch_size": 1024 * 64
 }
 
 # no_log = True

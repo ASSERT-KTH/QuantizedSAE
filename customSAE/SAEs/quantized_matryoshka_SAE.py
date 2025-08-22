@@ -18,13 +18,6 @@ class QuantizedMatryoshkaDecoder(nn.Module):
         self.abs_range = abs_range
         self.quant_step = abs_range / (2 ** n_bits - 1)
 
-        # Use torch.div with rounding_mode to avoid deprecated __rfloordiv__ warning
-        # self.nested_dictionary_percentage = torch.div(
-        #     torch.full((n_bits,), in_features, dtype=torch.long),
-        #     2 ** torch.arange(n_bits, dtype=torch.long),
-        #     rounding_mode='floor'
-        # )
-
         self.nested_dictionary_size = ((in_features) * (2 ** torch.arange(n_bits, dtype=torch.long)) / 2 ** (n_bits-1)).int()
 
         # Learnable real-valued weights; STE binarized in forward
@@ -35,6 +28,7 @@ class QuantizedMatryoshkaDecoder(nn.Module):
         self._ctx = [None] * self.n_bits
         B = latent.size(0)
         reconstruction = torch.zeros(B, self.out_features, device=latent.device, dtype=latent.dtype)
+        latent_group = []
         result = []
         start_idx = 0
 
@@ -53,14 +47,16 @@ class QuantizedMatryoshkaDecoder(nn.Module):
                 -torch.ones_like(weight_slice),
             ).detach()
 
+            scale = 2 ** (self.n_bits - i - 2) * self.quant_step
+
             ste_weight = (Bsign - weight_slice).detach() + weight_slice
-            
-            scale = 2 ** (self.n_bits - i - 1) * self.quant_step
 
             latent_slice = latent[:, start_idx:start_idx+size_i]
+
             reconstruction = reconstruction + scale * (latent_slice @ ste_weight)
 
             start_idx += size_i
+            latent_group.append(latent_slice.abs().sum(dim=-1).mean().clone())
             result.append(reconstruction.clone())
 
             self._ctx[i] = {
@@ -70,7 +66,7 @@ class QuantizedMatryoshkaDecoder(nn.Module):
                 'batch_size': B
             }
 
-        return result
+        return latent_group, result
 
     @torch.no_grad()
     def apply_secant_grad(self):
@@ -92,6 +88,7 @@ class QuantizedMatryoshkaDecoder(nn.Module):
             # Convert base grad g  ->  secant grad g_sec = g - 2*alpha^2 * z2 * B
             self.weight.grad[s:e, :].add_(
                 - 2 * c * m_i * (alpha**2) * z2[:, None] * Bslice
+                # - 2 * c * (alpha**2) * z2[:, None] * Bslice
             )
             start = e
 

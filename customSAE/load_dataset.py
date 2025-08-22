@@ -23,11 +23,23 @@ tokenizer = AutoTokenizer.from_pretrained(
 )
 
 dataset = load_dataset("EleutherAI/the_pile_deduplicated", split="train", streaming=True)
+
+# Check for existing batches to resume from
+import os
+existing_batches = [f for f in os.listdir('dataset/') if f.startswith('the_pile_deduplicated_4m_') and f.endswith('.pt')]
+batch_numbers = [int(f.split('_')[-1].split('.')[0]) for f in existing_batches if f.split('_')[-1].split('.')[0].isdigit()]
+batch_count = max(batch_numbers) if batch_numbers else 0
+print(f"Resuming from batch {batch_count + 1}")
+
+# Use dataset.skip() for efficient skipping - estimate documents needed
+# We need approximately 1.5-2x more documents than contexts due to filtering
+documents_to_skip = batch_count * (n_contexts // 100) * 2  # Conservative estimate
+print(f"Skipping approximately {documents_to_skip} documents...")
+dataset = dataset.skip(documents_to_skip)
 shuffled_dataset = dataset.shuffle(buffer_size=10000, seed=42)
 
 # trainingset = {"input_ids": [], "attention_mask": []}
 trainingset = []
-batch_count = 0
 
 for doc in dataset:
 # for doc in shuffled_dataset:
