@@ -35,7 +35,8 @@ print(f"Resuming from batch {batch_count + 1}")
 # We need approximately 1.5-2x more documents than contexts due to filtering
 documents_to_skip = batch_count * (n_contexts // 100) * 2  # Conservative estimate
 print(f"Skipping approximately {documents_to_skip} documents...")
-dataset = dataset.skip(documents_to_skip)
+if documents_to_skip > 0:
+    dataset = dataset.skip(documents_to_skip)
 shuffled_dataset = dataset.shuffle(buffer_size=10000, seed=42)
 
 # trainingset = {"input_ids": [], "attention_mask": []}
@@ -68,7 +69,7 @@ for doc in dataset:
         trainingset = []
         print(f"Batch {batch_count} finished!")
 
-    if batch_count == 100:
+    if batch_count == 200:  # Continue to 200 batches total
         break
 
 # torch.save({"input_ids": trainingset["input_ids"], "attention_mask": trainingset["attention_mask"]}, "dataset/the_pile_deduplicated_1k")

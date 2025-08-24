@@ -192,15 +192,15 @@ class Trainer():
 # Configuration
 config = {
     "input_dim": 512,
-    "n_bits": 4,
+    "n_bits": 8,
     # "hidden_dim": 2048,
-    "hidden_dim": 2048 * 8,
+    "hidden_dim": 2048 * 16,
     "gamma": 2,
     "epochs": 1,
-    "lr": 1e-4,
+    "lr": 1e-3,
     "top_k": 32,
     "sparsity_lambda": 1e-6,
-    "batch_size": 1024 * 64
+    "batch_size": 1024 * 32
 }
 
 # no_log = True
