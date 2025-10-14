@@ -66,22 +66,28 @@ class QuantizedMatryoshkaDecoder(nn.Module):
 
             latent_slice = latent[:, start_idx:start_idx+size_i]
 
+            # Top-k activation:(but not working well)
             # When top_k is uniformly distributed in all sub-groups.
-            if self.top_k is not None and self.top_k > 0:
-                k = min(self.top_k, latent_slice.shape[-1])
-                if k < latent_slice.shape[-1]:
-                    # _, topk_indices = torch.topk(latent_slice.abs(), k, dim=-1)
-                    _, topk_indices = torch.topk(latent_slice, k, dim=-1)
-                    mask = torch.zeros_like(latent_slice, dtype=torch.bool)
-                    mask.scatter_(dim=-1, index=topk_indices, value=True)
-                    latent_slice = latent_slice * mask
+            # if self.top_k is not None and self.top_k > 0:
+            #     k = min(self.top_k, latent_slice.shape[-1])
+            #     if k < latent_slice.shape[-1]:
+            #         # _, topk_indices = torch.topk(latent_slice.abs(), k, dim=-1)
+            #         _, topk_indices = torch.topk(latent_slice, k, dim=-1)
+            #         mask = torch.zeros_like(latent_slice, dtype=torch.bool)
+            #         mask.scatter_(dim=-1, index=topk_indices, value=True)
+            #         latent_slice = latent_slice * mask
 
-                    c = scale / self.quant_step
-                    # latent_slice = (latent_slice.sign() - latent_slice/c/c).detach() + latent_slice/c/c
-                    latent_slice = (latent_slice.sign() - latent_slice).detach() + latent_slice
+            #         c = scale / self.quant_step
+            #         # latent_slice = (latent_slice.sign() - latent_slice/c/c).detach() + latent_slice/c/c
+            #         # latent_slice = (latent_slice.sign() - latent_slice).detach() + latent_slice
+            #         # latent_slice = (latent_slice > 0 - latent_slice).detach() + latent_slice
+            #         latent_slice = (latent_slice > 0).detach() * latent_slice
 
-            # reconstruction = reconstruction + scale * (latent_slice @ ste_weight)
-            reconstruction = reconstruction.detach() + scale * (latent_slice @ (ste_weight + ste_weight_mirror))
+            latent_slice = (latent_slice > 0 - latent_slice).detach() + latent_slice
+
+            reconstruction = reconstruction.detach() + scale * (latent_slice @ ste_weight)
+            # reconstruction = reconstruction.detach() + scale * (latent_slice @ (ste_weight + ste_weight_mirror))
+            # reconstruction = reconstruction + (latent_slice @ (ste_weight + ste_weight_mirror))
 
             start_idx += size_i
             latent_group.append(latent_slice.abs().sum(dim=-1).mean().clone())
@@ -120,10 +126,13 @@ class QuantizedMatryoshkaDecoder(nn.Module):
             self.weight.grad[s:e, :].add_(
                 # - 2 * c * m_i * (alpha**2) * z2[:, None] * Bslice
                 - 2 * c * (alpha**2) * z2[:, None] * Bslice
+                # - 2 * c * alpha * z2[:, None] * Bslice
+                # - 2 * c * z2[:, None] * Bslice
             )
 
             self.weight_mirror.grad[s:e, :].add_(
                 - 2 * c * (alpha**2) * z2[:, None] * Bslice_mirror
+                # - 2 * c * z2[:, None] * Bslice_mirror
             )
             start = e
 

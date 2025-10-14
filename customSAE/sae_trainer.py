@@ -11,6 +11,7 @@ from SAEs.ternary_SAE import *
 from SAEs.binary_latent_SAE import *
 from SAEs.binary_SAE import *
 from SAEs.quantized_matryoshka_SAE import *
+from SAEs.baseline_SAE import *
 import numpy as np
 
 class Trainer():
@@ -40,6 +41,8 @@ class Trainer():
             # self.model = torch.compile(self.model, mode="reduce-overhead")
         elif sae_type == "q_sae":
             self.model = QuantizedMatryoshkaSAE(self.config["input_dim"], self.config["hidden_dim"], self.config["top_k"], self.config["gamma"], self.config["n_bits"]).to(self.device)
+        elif sae_type == "baseline_sae":
+            self.model = BaselineSparseAutoencoder(self.config["input_dim"], self.config["hidden_dim"]).to(self.device)
 
         self.epoch = 0
         self.chunk_files = [f for f in os.listdir("dataset/") if f.startswith('the_pile_hidden_states_L3_') and f.endswith('.pt')]
@@ -47,6 +50,7 @@ class Trainer():
         # rigL settings:
         self.rigL = rigL
         self.connection_fraction_to_update = 0.3
+        self.f_decay = None
 
         self.model_path = "SAEs/" + sae_type + "_" + str(self.config["hidden_dim"]) + ("_rigL" if rigL else "") + ".pth"
 
@@ -93,7 +97,8 @@ class Trainer():
                     # prev = recon
 
                     # Total loss:
-                    losses.append(F.mse_loss(recon, batch))
+                    # losses.append(F.mse_loss(recon, batch) * 2 ** (i + 2) / self.config["gamma"])
+                    losses.append(0.5*F.mse_loss(recon, batch))
 
                 loss_total = sum(losses)
                 loss_total.backward()
@@ -101,7 +106,7 @@ class Trainer():
                 self.model.decoder.apply_secant_grad()
                 optimizer.step()
 
-            if self.sae_type == 'b_sae':
+            elif self.sae_type == 'b_sae':
 
                 # self.model.store_decoder_pre_update_state()
                 latent, recon_loss, polarize_loss = self.model(batch)
@@ -134,6 +139,24 @@ class Trainer():
                 # print(sparsity_loss)
                 # print(inactivated_neurons)
 
+            elif self.sae_type == "t_sae":
+                latent, recon = self.model(batch)
+                loss = F.mse_loss(recon, batch)
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                self.model.decoder.mask_grad()
+                optimizer.step()
+                self.model.decoder.update_mask(self.f_decay, 0.7)
+            
+            elif self.sae_type == "baseline_sae":
+
+                latent, recon = self.model(batch)
+                loss = F.mse_loss(recon, batch)
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+                self.model.normalize_decoder_weights()
+
             if not no_log and batch_idx % 100 == 0:
                 # Log metrics
                 if self.sae_type == "b_sae":
@@ -153,12 +176,20 @@ class Trainer():
                     log_dict["recon_loss_total"] = loss_total.item()
                     log_dict.update({f"L0 of latent_group_{i}": latent_group[i].item() for i in range(self.config["n_bits"])})
                     wandb.log(log_dict)
+                elif self.sae_type == "t_sae":
+                    wandb.log({
+                        "loss": loss.item()
+                    })
+                elif self.sae_type == "baseline_sae":
+                    wandb.log({
+                        "loss": loss.item()
+                    })
                 else:
                     wandb.log({
-                        "loss": loss.item(),
-                        "recon_loss": recon_loss.item(),
-                        "sparsity_loss": sparsity_loss.item(),
-                        "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
+                        "loss": loss.item()
+                        # "recon_loss": recon_loss.item(),
+                        # "sparsity_loss": sparsity_loss.item(),
+                        # "inactivated_neurons": inactivated_neurons.item() if isinstance(inactivated_neurons, torch.Tensor) else inactivated_neurons
                     })
 
         return self.model
@@ -168,6 +199,8 @@ class Trainer():
         total_start = time.perf_counter()
 
         for epoch, f in enumerate(self.chunk_files):
+            if epoch > 10:
+                break
             print(f"Training on {f}:")
             if self.sae_type == "b_sae":
                 dataset = HiddenStatesTorchDatasetInBinary(os.path.join("dataset/", f), self.config["gamma"], self.config["n_bits"])
@@ -175,11 +208,11 @@ class Trainer():
                 dataset = HiddenStatesTorchDataset(os.path.join("dataset/", f))
             # print(f"The dataset size is {dataset.__len__()}.")
             if self.rigL:
-                f_decay = self.connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(self.chunk_files)))
-                self.model.decoder.update_mask(f_decay, 0.7)
+                self.f_decay = self.connection_fraction_to_update / 2 * (1 + math.cos(epoch*math.pi/len(self.chunk_files)))
+                self.model.decoder.update_mask(self.f_decay, 0.7)
             else:
                 f_decay = None
-            self.one_epoch(dataset, dead_neuron_threshold=0.2, no_log=self.no_log, rigL=self.rigL, f_decay=f_decay)
+            self.one_epoch(dataset, dead_neuron_threshold=0.2, no_log=self.no_log, rigL=self.rigL, f_decay=self.f_decay)
 
         if not self.no_log:
             wandb.finish()
@@ -200,12 +233,14 @@ config = {
     "lr": 1e-3,
     "top_k": 32,
     "sparsity_lambda": 1e-6,
-    "batch_size": 1024 * 32
+    "batch_size": 1024 * 16
 }
 
 # no_log = True
 no_log = False
 # trainer = Trainer(config, "b_sae", False, no_log, "binary_sae_training_no_carry_loss")
 trainer = Trainer(config, "q_sae", False, no_log, "quantized_matryoshka_sae_training")
+# trainer = Trainer(config, "t_sae", True, no_log, "ternary_sae_training")
+# trainer = Trainer(config, "baseline_sae", False, no_log, "baseline_sae_training")
 
 trainer.train()

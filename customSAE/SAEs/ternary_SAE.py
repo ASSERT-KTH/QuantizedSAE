@@ -7,7 +7,7 @@ class STEWeights(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        self.threshold = 0.33 # For ternary SAE
+        self.threshold = 0.5 # For ternary SAE
 
         self.register_buffer('mask', torch.ones_like(self.weight))
         self.register_buffer('input_activations', None)
@@ -52,6 +52,7 @@ class STEWeights(nn.Module):
         return F.linear(x, masked_weight + (hard_weights - masked_weight).detach())
 
     def update_mask(self, f_decay, sparsity_rate=0.7):
+
         with torch.no_grad():
             flat_weights = self.weight.data.flatten()
             flat_mask = self.mask.flatten()
@@ -96,7 +97,26 @@ class TernarySparseAutoencoder(nn.Module):
             nn.ReLU()
         )
         self.decoder = STEWeights(hidden_dim, input_dim)
+        self.topk = int(hidden_dim * 0.002)
+        
+    def apply_topk_activation(self, h):
+        """Apply top-k activation to enforce sparsity"""
+        batch_size, hidden_dim = h.shape
+        
+        # Get top-k indices for each sample in the batch
+        topk_values, topk_indices = torch.topk(h, self.topk, dim=1)
+        
+        # Create sparse activation tensor
+        topk_values = torch.where(topk_values > 0, topk_values, torch.zeros_like(topk_values))
+        h_sparse = torch.zeros_like(h)
+        h_sparse.scatter_(1, topk_indices, topk_values)
+        
+        return h_sparse
         
     def forward(self, x):
         h = self.encoder(x)
+        
+        # Apply top-k activation for sparsity
+        # h_sparse = self.apply_topk_activation(h)
+
         return h, self.decoder(h)
