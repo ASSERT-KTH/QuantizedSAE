@@ -137,3 +137,30 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Model files and checkpoints
+models/
+*.pth
+*.pt
+*.safetensors
+*.bin
+*.ckpt
+*.h5
+*.hdf5
+*.pb
+*.onnx
+*.tflite
+*.mlmodel
+*.pkl
+*.pickle
+*.joblib
+
+# HuggingFace model caches and downloads
+.cache/
+huggingface/
+transformers/
+*.lock
+
+# WandB artifacts and logs
+wandb/
+*.wandb
