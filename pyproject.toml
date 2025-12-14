@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantized-sae"
+version = "0.1.0"
+description = "Quantized Sparse Autoencoder implementations for efficient representation learning"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+maintainers = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+keywords = ["sparse autoencoder", "quantization", "machine learning", "neural networks"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "wandb",
+    "transformers",
+    "datasets",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/quantizedSAE"
+Documentation = "https://github.com/yourusername/quantizedSAE#readme"
+Repository = "https://github.com/yourusername/quantizedSAE.git"
+Issues = "https://github.com/yourusername/quantizedSAE/issues"
+Changelog = "https://github.com/yourusername/quantizedSAE/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
