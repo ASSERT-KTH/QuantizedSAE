@@ -54,18 +54,22 @@ pip install -e .
 
 ## Quick Start
 
-### Training a Binary SAE
+### Training SAEs
+
+The unified training script supports all SAE variants:
 
 ```bash
-cd scripts/training
-python train_binary.py
-```
+# Binary SAE with two's complement encoding
+python scripts/training/train.py --sae_type b_sae --input_dim 512 --hidden_dim 32768 --n_bits 4 --data_path /path/to/data.pt
 
-### Training a Quantized SAE
+# Quantized Matryoshka SAE
+python scripts/training/train.py --sae_type q_sae --input_dim 512 --hidden_dim 32768 --top_k 32 --n_bits 4 --data_path /path/to/data.pt
 
-```bash
-cd scripts/training
-python train_quantized.py
+# Ternary SAE with learned sparsity
+python scripts/training/train.py --sae_type t_sae --input_dim 512 --hidden_dim 32768 --data_path /path/to/data.pt
+
+# Baseline SAE
+python scripts/training/train.py --sae_type baseline_sae --input_dim 512 --hidden_dim 32768 --data_path /path/to/data.pt
 ```
 
 ### Running Analysis
@@ -78,30 +82,63 @@ python analyze_sae.py --model_path ../models/trained_sae.pth
 ## SAE Variants
 
 ### Baseline SAE
-Standard sparse autoencoder implementation with ReLU activation and linear decoder.
+Standard sparse autoencoder implementation with:
+- **Encoder**: Linear layer with ReLU activation
+- **Decoder**: Linear layer
+- **Sparsity**: Top-k activation selection
+- **Use case**: Baseline for comparison, no quantization
 
-### Binary SAE
-Quantizes weights to binary values {-1, +1} for extreme compression.
+### Binary SAE (Two's Complement Encoding)
+Advanced binary quantization with integer representation:
+- **Encoding**: Each weight represented by `n_bits` binary values (0/1)
+- **Two's Complement**: Most significant bit (MSB) is negative, enabling signed integer representation
+- **Integer Conversion**: Binary bits converted to integers using weighted sum: `Σ(bit_i × 2^i)` with `bit_{MSB} × (-2^{n_bits-1})`
+- **Quantization Range**: Controlled by `gamma` parameter, mapping integers to floating-point values
+- **Training**: Uses continuous sigmoid probabilities during training, thresholded to binary during inference
+- **Use case**: Extreme compression while maintaining rich integer representation
 
-### Ternary SAE
-Quantizes weights to ternary values {-1, 0, +1} with learned sparsity masks.
+**Example**: With 4 bits and gamma=4.0, binary pattern `[1,0,1,0]` becomes integer `1×(-8) + 0×4 + 1×2 + 0×1 = -6`, then scales to `-6 × (4.0/8) = -3.0`
 
-### Quantized Matryoshka SAE
-Hierarchical quantization that allows different precision levels for different bits.
+### Ternary SAE (Learned Sparsity)
+Ternary quantization with adaptive sparsity:
+- **Weights**: Values constrained to {-1, 0, +1}
+- **Sparsity**: Learned masks that dynamically prune weights during training
+- **Dynamic Pruning**: Weights below threshold become zero, others quantized to ±1
+- **Gradient Masks**: Prevents gradient flow through pruned connections
+- **Use case**: Balances compression with sparsity for efficient inference
+
+### Quantized Matryoshka SAE (Hierarchical Quantization)
+Nested quantization with progressive precision:
+- **Architecture**: Multiple quantization levels with increasing bit depths
+- **Nested Dictionaries**: Each level refines the previous quantization
+- **Hierarchical**: Lower bits provide coarse quantization, higher bits add precision
+- **Top-k Integration**: Sparsity applied at each quantization level
+- **Use case**: Variable precision - can use fewer bits for faster inference or more bits for accuracy
 
 ### Residual Quantized SAE
-Uses residual connections between quantization levels for better reconstruction.
+Residual connections across quantization levels:
+- **Residual Learning**: Each quantization level corrects errors from previous levels
+- **Accumulative Precision**: Errors compound to improve overall reconstruction
+- **Bit-wise Residuals**: Each bit contributes to correcting the accumulated error
+- **Use case**: Better reconstruction quality by leveraging error correction across quantization levels
 
 ## Configuration
 
-Training configurations are specified as dictionaries with the following keys:
-- `input_dim`: Input feature dimension
-- `hidden_dim`: Hidden dimension (sparsity level)
-- `lr`: Learning rate
-- `batch_size`: Training batch size
-- `n_bits`: Number of bits for quantization (for quantized variants)
-- `top_k`: Sparsity level (for some variants)
-- `gamma`: Quantization parameter
+Training configurations use the following parameters:
+
+### Common Parameters
+- `input_dim`: Input feature dimension (e.g., 512 for transformer hidden states)
+- `hidden_dim`: Hidden dimension / dictionary size (e.g., 32768)
+- `lr`: Learning rate (default: 1e-3)
+- `batch_size`: Training batch size (default: 4096)
+- `epochs`: Number of training epochs (default: 100)
+
+### Quantized SAE Parameters
+- `n_bits`: Number of bits for quantization (affects compression ratio and precision)
+- `gamma`: Quantization range parameter (controls the floating-point range that integers map to)
+  - For binary SAE: Maps quantized integers to `[-gamma, gamma]` range
+  - For hierarchical SAEs: Controls absolute range of quantization levels
+- `top_k`: Sparsity level for hierarchical SAEs (number of active features)
 
 ## Analysis Tools
 
@@ -129,10 +166,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 If you use this code in your research, please cite:
 
 ```
-@misc{quantizedsae2024,
+@misc{quantizedsae2025,
   title={Quantized Sparse Autoencoders},
-  author={Your Name},
-  year={2024},
+  author={Tux},
+  year={2025},
   url={https://github.com/yourusername/quantizedSAE}
 }
 ```
